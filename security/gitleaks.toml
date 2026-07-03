@@ -1,0 +1,9 @@
+title = "DevSecOps Gitleaks config"
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''microservice/server/data/orders\.json''',
+  '''\.git/''',
+]

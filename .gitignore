@@ -1,0 +1,16 @@
+node_modules/
+npm-debug.log*
+.env
+.env.*
+*.log
+.DS_Store
+coverage/
+.nyc_output/
+dependency-check-report/
+trivy-report/
+gitleaks-report/
+.sonar/
+cosign.key
+cosign.pub
+*.pem
+vars/credentials.yml
