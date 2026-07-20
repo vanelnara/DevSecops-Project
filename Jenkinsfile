@@ -42,8 +42,13 @@ pipeline {
                 script {
                     runLoggedStage('Unit Tests', 'Running npm test') {
                         dir('microservice') {
-                            sh 'npm ci'
-                            sh 'npm test'
+                            sh '''
+                                export PATH=/usr/bin:/usr/local/bin:$PATH
+                                node --version
+                                npm --version
+                                npm ci
+                                npm test
+                            '''
                         }
                         logToPostgres('Unit Tests', 'SUCCESS', 'All unit tests passed')
                     }
