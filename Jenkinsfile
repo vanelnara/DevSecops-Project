@@ -5,8 +5,8 @@ pipeline {
         APP_NAME           = 'devsecops-project'
         DOCKER_IMAGE       = 'sneproject/devsecops-project'
         DOCKER_TAG         = "${env.BUILD_NUMBER}"
-        SONAR_HOST         = 'http://192.168.10.149:9000'
         SONAR_PROJECT_KEY  = 'devsecops-simple-shop'
+        SONAR_CREDENTIALS_ID = 'sonarqube-token'
         SONAR_SCANNER_HOME = '/opt/sonar-scanner-6.2.1.4610-linux-x64'
         PATH               = "${env.SONAR_SCANNER_HOME}/bin:/usr/local/bin:/usr/bin:/bin:${env.PATH}"
         KUBE_NAMESPACE     = 'devsecops'
@@ -59,17 +59,36 @@ pipeline {
         stage('SAST - SonarQube') {
             steps {
                 script {
-                    runLoggedStage('SAST', 'SonarQube analysis') {
-                        dir('microservice') {
-                            withSonarQubeEnv('sonarqube-server') {
-                                sh """
+                    runLoggedStage('SAST', 'SonarQube analysis from repo root') {
+                        withSonarQubeEnv('sonarqube-server') {
+                            withCredentials([
+                                string(
+                                    credentialsId: env.SONAR_CREDENTIALS_ID,
+                                    variable: 'SONAR_TOKEN'
+                                )
+                            ]) {
+                                sh '''
+                                    set -eu
+
+                                    AUTH_VALID="$(curl --silent --show-error --fail \
+                                      --user "${SONAR_TOKEN}:" \
+                                      "${SONAR_HOST_URL}/api/authentication/validate" |
+                                      tr -d '[:space:]')"
+
+                                    if [ "${AUTH_VALID}" != '{"valid":true}' ]; then
+                                      echo "ERROR: Jenkins credential 'sonarqube-token' is not a valid SonarQube token."
+                                      echo "Replace it with a valid User, Project Analysis, or Global Analysis token."
+                                      exit 2
+                                    fi
+
                                     sonar-scanner \
-                                      -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                      -Dsonar.token="${SONAR_TOKEN}" \
+                                      -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
                                       -Dproject.settings=sonar-project.properties
-                                """
+                                '''
                             }
                         }
-                        logToPostgres('SAST', 'SUCCESS', 'SonarQube scan completed')
+                        logToPostgres('SAST', 'SUCCESS', "SonarQube scan completed for ${SONAR_PROJECT_KEY}")
                     }
                 }
             }
