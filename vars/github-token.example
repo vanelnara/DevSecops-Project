@@ -1,0 +1,5 @@
+# Paste your GitHub Personal Access Token on the line below (one line only)
+# Create at: https://github.com/settings/tokens  (enable "repo" scope)
+# Then: cp vars/github-token.example vars/github-token  and edit
+
+ghp_REPLACE_WITH_YOUR_TOKEN

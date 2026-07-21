@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: devsecops-simple-shop
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: devsecops-project
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/vanelnara/DevSecops-Project.git
+    targetRevision: main
+    path: k8s
+    directory:
+      exclude: argocd-application.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
