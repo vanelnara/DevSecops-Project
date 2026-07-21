@@ -70,6 +70,15 @@ pipeline {
                                 sh '''
                                     set -eu
 
+                                    # Fail clearly if SonarQube server is down (common after reboot)
+                                    if ! curl --silent --show-error --fail --max-time 10 \
+                                      "${SONAR_HOST_URL}/api/system/status" >/tmp/sonar-status.json; then
+                                      echo "ERROR: Cannot reach SonarQube at ${SONAR_HOST_URL}"
+                                      echo "On node1 check: docker ps -a | grep sonarqube && docker start sonarqube"
+                                      exit 2
+                                    fi
+                                    echo "SonarQube status: $(cat /tmp/sonar-status.json)"
+
                                     AUTH_VALID="$(curl --silent --show-error --fail \
                                       --user "${SONAR_TOKEN}:" \
                                       "${SONAR_HOST_URL}/api/authentication/validate" |
@@ -98,18 +107,24 @@ pipeline {
             steps {
                 script {
                     runLoggedStage('Dependency Scan', 'OWASP Dependency-Check') {
-                        sh '''
-                            set -eu
-                            mkdir -p reports/dependency-check
-                            /opt/dependency-check/bin/dependency-check.sh \
-                              --project "${APP_NAME}" \
-                              --scan microservice \
-                              --format ALL \
-                              --out reports/dependency-check \
-                              --data /var/lib/jenkins/.dependency-check \
-                              --suppression security/dependency-check-suppressions.xml
-                        '''
+                        withCredentials([
+                            string(credentialsId: 'nvd-api-key', variable: 'NVD_API_KEY')
+                        ]) {
+                            sh '''
+                                set -eu
+                                mkdir -p reports/dependency-check
+                                /opt/dependency-check/bin/dependency-check.sh \
+                                  --project "${APP_NAME}" \
+                                  --scan microservice \
+                                  --format ALL \
+                                  --out reports/dependency-check \
+                                  --data /var/lib/jenkins/.dependency-check \
+                                  --suppression security/dependency-check-suppressions.xml \
+                                  --nvdApiKey "${NVD_API_KEY}"
+                            '''
+                        }
                         dependencyCheckPublisher pattern: 'reports/dependency-check/dependency-check-report.xml'
+                        archiveArtifacts artifacts: 'reports/dependency-check/**/*', allowEmptyArchive: true
                         logToPostgres('Dependency Scan', 'SUCCESS', 'Dependency check report published')
                     }
                 }
