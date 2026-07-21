@@ -98,12 +98,17 @@ pipeline {
             steps {
                 script {
                     runLoggedStage('Dependency Scan', 'OWASP Dependency-Check') {
-                        dependencyCheck additionalArguments: '''
-                            --scan microservice
-                            --format ALL
-                            --out reports/dependency-check
-                            --suppression security/dependency-check-suppressions.xml
-                        ''', odcInstallation: 'owasp-dependency-check'
+                        sh '''
+                            set -eu
+                            mkdir -p reports/dependency-check
+                            /opt/dependency-check/bin/dependency-check.sh \
+                              --project "${APP_NAME}" \
+                              --scan microservice \
+                              --format ALL \
+                              --out reports/dependency-check \
+                              --data /var/lib/jenkins/.dependency-check \
+                              --suppression security/dependency-check-suppressions.xml
+                        '''
                         dependencyCheckPublisher pattern: 'reports/dependency-check/dependency-check-report.xml'
                         logToPostgres('Dependency Scan', 'SUCCESS', 'Dependency check report published')
                     }
