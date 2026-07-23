@@ -11,7 +11,7 @@ pipeline {
         PATH               = "${env.SONAR_SCANNER_HOME}/bin:/usr/local/bin:/usr/bin:/bin:${env.PATH}"
         KUBE_NAMESPACE     = 'devsecops'
         APP_NODEPORT       = '30081'
-        ARGOCD_SERVER      = '192.168.10.149:30080'
+        ARGOCD_SERVER      = '192.168.10.149:30443'
         ARGOCD_APP_NAME    = 'devsecops-simple-shop'
         REPORTS_DIR        = 'reports'
         GIT_REPO           = 'https://github.com/vanelnara/DevSecops-Project.git'
@@ -19,6 +19,7 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '20'))
+        disableConcurrentBuilds()
         timestamps()
         timeout(time: 60, unit: 'MINUTES')
     }
@@ -290,7 +291,7 @@ pipeline {
                                 argocd login "${ARGOCD_SERVER}" \
                                   --username admin \
                                   --password "${ARGOCD_PASS}" \
-                                  --plaintext \
+                                  --insecure \
                                   --grpc-web
                                 argocd app set "${ARGOCD_APP_NAME}" \
                                   --kustomize-image \
