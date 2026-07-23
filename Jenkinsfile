@@ -172,10 +172,29 @@ pipeline {
                 script {
                     runLoggedStage('Docker Build', "Building ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}") {
                         dir('microservice') {
-                            docker.withRegistry('https://index.docker.io/v1/', 'dockerhub-credentials') {
-                                def img = docker.build("${DOCKER_IMAGE}:${DOCKER_TAG}")
-                                img.push()
-                                img.push('latest')
+                            withCredentials([
+                                usernamePassword(
+                                    credentialsId: 'dockerhub-credentials',
+                                    usernameVariable: 'DOCKERHUB_USERNAME',
+                                    passwordVariable: 'DOCKERHUB_PASSWORD'
+                                )
+                            ]) {
+                                sh '''
+                                    set -eu
+                                    trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+                                    printf '%s' "${DOCKERHUB_PASSWORD}" |
+                                      docker login \
+                                        --username "${DOCKERHUB_USERNAME}" \
+                                        --password-stdin
+
+                                    docker build --pull \
+                                      --tag "${DOCKER_IMAGE}:${DOCKER_TAG}" \
+                                      --tag "${DOCKER_IMAGE}:latest" \
+                                      .
+                                    docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
+                                    docker push "${DOCKER_IMAGE}:latest"
+                                '''
                             }
                         }
                         logToPostgres('Docker Build', 'SUCCESS', "Pushed ${DOCKER_IMAGE}:${DOCKER_TAG}")
