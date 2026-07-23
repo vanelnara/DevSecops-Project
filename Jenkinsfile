@@ -280,37 +280,33 @@ pipeline {
                 script {
                     runLoggedStage('K8s Deploy', 'Deploying via Argo CD to worker node') {
                         withCredentials([string(credentialsId: 'argocd-admin-password', variable: 'ARGOCD_PASS')]) {
-                            sh """
-                                set -e
-                                export KUBECONFIG=/etc/kubernetes/admin.conf
+                            sh '''
+                                set -eu
+                                export KUBECONFIG=/var/lib/jenkins/.kube/config
 
                                 kubectl apply -f k8s/namespace.yaml
                                 kubectl apply -f k8s/argocd-application.yaml
 
-                                mkdir -p .deploy/k8s
-                                cp k8s/namespace.yaml k8s/service.yaml .deploy/k8s/
-                                sed "s|sneproject/devsecops-project:latest|${DOCKER_IMAGE}:${DOCKER_TAG}|g" \\
-                                  k8s/deployment.yaml > .deploy/k8s/deployment.yaml
+                                argocd login "${ARGOCD_SERVER}" \
+                                  --username admin \
+                                  --password "${ARGOCD_PASS}" \
+                                  --plaintext \
+                                  --grpc-web
+                                argocd app set "${ARGOCD_APP_NAME}" \
+                                  --kustomize-image \
+                                  "${DOCKER_IMAGE}=${DOCKER_IMAGE}:${DOCKER_TAG}"
+                                argocd app sync "${ARGOCD_APP_NAME}" \
+                                  --prune \
+                                  --timeout 300
+                                argocd app wait "${ARGOCD_APP_NAME}" \
+                                  --sync \
+                                  --health \
+                                  --timeout 300
 
-                                kubectl apply -f .deploy/k8s/
-
-                                if command -v argocd >/dev/null 2>&1; then
-                                  argocd login "${ARGOCD_SERVER}" \\
-                                    --username admin \\
-                                    --password "\${ARGOCD_PASS}" \\
-                                    --insecure \\
-                                    --grpc-web
-                                  argocd app sync "${ARGOCD_APP_NAME}" --force --timeout 300 || true
-                                  argocd app wait "${ARGOCD_APP_NAME}" --health --timeout 300 || true
-                                else
-                                  kubectl annotate application "${ARGOCD_APP_NAME}" -n argocd \\
-                                    argocd.argoproj.io/refresh=hard --overwrite || true
-                                fi
-
-                                kubectl rollout status deployment/simple-shop \\
+                                kubectl rollout status deployment/simple-shop \
                                   -n "${KUBE_NAMESPACE}" --timeout=180s
                                 kubectl get pods -n "${KUBE_NAMESPACE}" -o wide
-                            """
+                            '''
                         }
                         logToPostgres('K8s Deploy', 'SUCCESS', "Deployed to namespace ${KUBE_NAMESPACE}")
                     }
