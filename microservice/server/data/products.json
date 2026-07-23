@@ -1,0 +1,98 @@
+[
+  {
+    "id": 1,
+    "name": "Wireless Headphones",
+    "description": "Comfortable over-ear headphones with noise isolation and 30-hour battery life.",
+    "price": 79.99,
+    "category": "Electronics",
+    "image": "https://picsum.photos/seed/wireless-headphones/400/400"
+  },
+  {
+    "id": 2,
+    "name": "Classic T-Shirt",
+    "description": "Soft cotton t-shirt available in multiple colors. Perfect for everyday wear.",
+    "price": 24.99,
+    "category": "Clothing",
+    "image": "https://picsum.photos/seed/classic-tshirt/400/400"
+  },
+  {
+    "id": 3,
+    "name": "Running Shoes",
+    "description": "Lightweight running shoes with cushioned sole for all-day comfort.",
+    "price": 89.99,
+    "category": "Footwear",
+    "image": "https://picsum.photos/seed/running-shoes/400/400"
+  },
+  {
+    "id": 4,
+    "name": "Smart Watch",
+    "description": "Fitness tracking, heart rate monitor, and smartphone notifications.",
+    "price": 149.99,
+    "category": "Electronics",
+    "image": "https://picsum.photos/seed/smart-watch/400/400"
+  },
+  {
+    "id": 5,
+    "name": "Backpack",
+    "description": "Durable water-resistant backpack with laptop compartment.",
+    "price": 49.99,
+    "category": "Accessories",
+    "image": "https://picsum.photos/seed/backpack/400/400"
+  },
+  {
+    "id": 6,
+    "name": "Coffee Mug",
+    "description": "Ceramic mug with 350ml capacity. Dishwasher safe.",
+    "price": 12.99,
+    "category": "Home",
+    "image": "https://picsum.photos/seed/coffee-mug/400/400"
+  },
+  {
+    "id": 7,
+    "name": "Desk Lamp",
+    "description": "Adjustable LED desk lamp with three brightness levels.",
+    "price": 34.99,
+    "category": "Home",
+    "image": "https://picsum.photos/seed/desk-lamp/400/400"
+  },
+  {
+    "id": 8,
+    "name": "Yoga Mat",
+    "description": "Non-slip yoga mat with carrying strap. 6mm thick.",
+    "price": 29.99,
+    "category": "Sports",
+    "image": "https://picsum.photos/seed/yoga-mat/400/400"
+  },
+  {
+    "id": 9,
+    "name": "Bluetooth Speaker",
+    "description": "Portable speaker with rich bass, 12-hour battery, and waterproof design.",
+    "price": 59.99,
+    "category": "Electronics",
+    "image": "https://picsum.photos/seed/bluetooth-speaker/400/400"
+  },
+  {
+    "id": 10,
+    "name": "Denim Jacket",
+    "description": "Classic denim jacket with button closure and front pockets.",
+    "price": 69.99,
+    "category": "Clothing",
+    "image": "https://picsum.photos/seed/denim-jacket/400/400"
+  },
+  {
+    "id": 11,
+    "name": "Water Bottle",
+    "description": "Stainless steel insulated bottle keeps drinks cold for 24 hours.",
+    "price": 19.99,
+    "category": "Sports",
+    "image": "https://picsum.photos/seed/water-bottle/400/400"
+  },
+  {
+    "id": 12,
+    "name": "Leather Notebook",
+    "description": "A5 notebook with 200 lined pages and elastic band closure.",
+    "price": 15.99,
+    "category": "Accessories",
+    "image": "https://picsum.photos/seed/notebook/400/400"
+  }
+]

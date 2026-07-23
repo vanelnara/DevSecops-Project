@@ -7,9 +7,9 @@ RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-COPY server ./server
-COPY public ./public
-COPY scripts ./scripts
+COPY --chown=nodejs:nodejs server ./server
+COPY --chown=nodejs:nodejs public ./public
+COPY --chown=nodejs:nodejs scripts ./scripts
 
 USER nodejs
 EXPOSE 3000

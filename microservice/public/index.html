@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simple Shop</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: system-ui, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 1rem 1.5rem;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    header div, main { margin: auto; max-width: 1100px; }
+    header div { align-items: center; display: flex; justify-content: space-between; }
+    h1 { margin: 0 0 1rem; }
+    main { padding: 2rem 1.5rem; }
+    .filters { display: flex; gap: .75rem; margin-bottom: 1.25rem; }
+    input, select, button {
+      border: 1px solid #cbd5e1;
+      border-radius: .5rem;
+      font: inherit;
+      padding: .65rem .8rem;
+    }
+    input { flex: 1; }
+    button { background: #2563eb; color: #fff; cursor: pointer; }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    }
+    article {
+      background: #fff;
+      border-radius: .75rem;
+      box-shadow: 0 1px 4px #0f172a1a;
+      overflow: hidden;
+    }
+    article img { aspect-ratio: 4/3; object-fit: cover; width: 100%; }
+    article div { padding: 1rem; }
+    article h2 { font-size: 1.05rem; margin: 0 0 .4rem; }
+    article p { color: #64748b; min-height: 3rem; }
+    .price { color: #0f172a; font-size: 1.1rem; font-weight: 700; }
+    .footer { align-items: center; display: flex; justify-content: space-between; }
+    #message { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <strong>Simple Shop</strong>
+      <span>Cart: <b id="cart-count">0</b></span>
+    </div>
+  </header>
+  <main>
+    <h1>Products</h1>
+    <div class="filters">
+      <input id="search" type="search" placeholder="Search products">
+      <select id="category"><option value="">All categories</option></select>
+    </div>
+    <p id="message">Loading…</p>
+    <section id="products" class="grid"></section>
+  </main>
+  <script>
+    const state = { products: [], cart: [] };
+    const productsElement = document.querySelector('#products');
+    const messageElement = document.querySelector('#message');
+    const searchElement = document.querySelector('#search');
+    const categoryElement = document.querySelector('#category');
+    const cartCountElement = document.querySelector('#cart-count');
+
+    function render() {
+      const search = searchElement.value.trim().toLowerCase();
+      const category = categoryElement.value;
+      const products = state.products.filter((product) =>
+        (!category || product.category === category) &&
+        (!search || `${product.name} ${product.description}`.toLowerCase().includes(search))
+      );
+
+      productsElement.innerHTML = products.map((product) => `
+        <article>
+          <img src="${product.image}" alt="${product.name}" loading="lazy">
+          <div>
+            <h2>${product.name}</h2>
+            <small>${product.category}</small>
+            <p>${product.description}</p>
+            <div class="footer">
+              <span class="price">$${product.price.toFixed(2)}</span>
+              <button type="button" data-product-id="${product.id}">Add</button>
+            </div>
+          </div>
+        </article>
+      `).join('');
+
+      messageElement.textContent = products.length ? '' : 'No products found.';
+    }
+
+    productsElement.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-product-id]');
+      if (!button) return;
+      state.cart.push(Number(button.dataset.productId));
+      cartCountElement.textContent = state.cart.length;
+    });
+    searchElement.addEventListener('input', render);
+    categoryElement.addEventListener('change', render);
+
+    fetch('/api/products')
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((products) => {
+        state.products = products;
+        [...new Set(products.map((product) => product.category))]
+          .sort()
+          .forEach((category) => categoryElement.add(new Option(category, category)));
+        render();
+      })
+      .catch((error) => {
+        messageElement.textContent = `Unable to load products: ${error.message}`;
+      });
+  </script>
+</body>
+</html>
