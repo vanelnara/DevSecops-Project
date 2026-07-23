@@ -24,13 +24,24 @@
 
 This project uses a **key pair** stored as Jenkins credential `cosign-private-key`.
 
-## Generate keys (one time, on server2)
+## Generate keys (one time, on the Jenkins server)
 
 ```bash
+install -d -m 0700 /root/cosign
+cd /root/cosign
 cosign generate-key-pair
-# Creates cosign.key (private) and cosign.pub (public)
-# Add cosign.key content to Jenkins credential — NEVER commit to Git
 ```
+
+Enter and retain a strong key password. This creates `cosign.key` (private)
+and `cosign.pub` (public). Never commit the private key.
+
+In **Jenkins → Manage Jenkins → Credentials → System → Global credentials**:
+
+1. Add `cosign.key` as **Secret file**, ID `cosign-private-key`.
+2. Add its password as **Secret text**, ID `cosign-password`.
+3. Ensure `dockerhub-credentials` is a Docker Hub username/token with write
+   access to `sneproject/devsecops-project`, because Cosign stores the
+   signature alongside the image in the registry.
 
 ## Manual sign & verify
 

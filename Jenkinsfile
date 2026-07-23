@@ -151,17 +151,27 @@ pipeline {
             steps {
                 script {
                     runLoggedStage('Gitleaks', 'Scanning for secrets') {
-                        sh '''
-                            mkdir -p reports/gitleaks
-                            gitleaks detect \
-                              --source . \
-                              --config security/gitleaks.toml \
-                              --report-path reports/gitleaks/report.json \
-                              --report-format json \
-                              --exit-code 1 || true
-                        '''
+                        def gitleaksExit = sh(
+                            returnStatus: true,
+                            script: '''
+                                mkdir -p reports/gitleaks
+                                gitleaks detect \
+                                  --source . \
+                                  --config security/gitleaks.toml \
+                                  --report-path reports/gitleaks/report.json \
+                                  --report-format json \
+                                  --exit-code 1
+                            '''
+                        )
                         archiveArtifacts artifacts: 'reports/gitleaks/*.json', allowEmptyArchive: true
-                        logToPostgres('Gitleaks', 'SUCCESS', 'Gitleaks scan completed')
+                        if (gitleaksExit == 1) {
+                            logToPostgres('Gitleaks', 'UNSTABLE', 'Potential secrets found; inspect the archived report')
+                            unstable('Gitleaks found potential secrets; inspect reports/gitleaks/report.json')
+                        } else if (gitleaksExit != 0) {
+                            error("Gitleaks failed with exit code ${gitleaksExit}")
+                        } else {
+                            logToPostgres('Gitleaks', 'SUCCESS', 'No secrets detected')
+                        }
                     }
                 }
             }
@@ -226,13 +236,39 @@ pipeline {
             steps {
                 script {
                     runLoggedStage('Cosign', 'Signing container image') {
-                        withCredentials([file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY')]) {
-                            sh """
-                                export COSIGN_PASSWORD="\${COSIGN_PASSWORD:-}"
-                                cosign sign --key \${COSIGN_KEY} \
-                                  -y ${DOCKER_IMAGE}:${DOCKER_TAG}
-                            """
+                        withCredentials([
+                            file(credentialsId: 'cosign-private-key', variable: 'COSIGN_KEY'),
+                            string(credentialsId: 'cosign-password', variable: 'COSIGN_PASSWORD'),
+                            usernamePassword(
+                                credentialsId: 'dockerhub-credentials',
+                                usernameVariable: 'DOCKERHUB_USERNAME',
+                                passwordVariable: 'DOCKERHUB_PASSWORD'
+                            )
+                        ]) {
+                            sh '''
+                                set -eu
+                                trap 'docker logout >/dev/null 2>&1 || true' EXIT
+
+                                printf '%s' "${DOCKERHUB_PASSWORD}" |
+                                  docker login \
+                                    --username "${DOCKERHUB_USERNAME}" \
+                                    --password-stdin
+
+                                mkdir -p .deploy
+                                cosign sign \
+                                  --key "${COSIGN_KEY}" \
+                                  --yes \
+                                  "${DOCKER_IMAGE}:${DOCKER_TAG}"
+                                cosign public-key \
+                                  --key "${COSIGN_KEY}" \
+                                  > .deploy/cosign.pub
+                                cosign verify \
+                                  --key .deploy/cosign.pub \
+                                  "${DOCKER_IMAGE}:${DOCKER_TAG}" \
+                                  >/dev/null
+                            '''
                         }
+                        archiveArtifacts artifacts: '.deploy/cosign.pub', allowEmptyArchive: false
                         logToPostgres('Cosign', 'SUCCESS', "Image signed: ${DOCKER_IMAGE}:${DOCKER_TAG}")
                     }
                 }
