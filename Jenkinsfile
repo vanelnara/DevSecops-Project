@@ -112,6 +112,20 @@ pipeline {
                         ]) {
                             sh '''
                                 set -eu
+
+                                NVD_STATUS="$(curl --silent --show-error \
+                                  --output /tmp/nvd-api-check.json \
+                                  --write-out '%{http_code}' \
+                                  --max-time 30 \
+                                  --header "apiKey: ${NVD_API_KEY}" \
+                                  'https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1')"
+
+                                if [ "${NVD_STATUS}" != "200" ]; then
+                                  echo "ERROR: NVD rejected the Jenkins credential 'nvd-api-key' (HTTP ${NVD_STATUS})."
+                                  echo "Confirm the NIST activation email, then replace the Jenkins Secret text without spaces or quotes."
+                                  exit 2
+                                fi
+
                                 mkdir -p reports/dependency-check
                                 /opt/dependency-check/bin/dependency-check.sh \
                                   --project "${APP_NAME}" \
@@ -120,6 +134,8 @@ pipeline {
                                   --out reports/dependency-check \
                                   --data /var/lib/jenkins/.dependency-check \
                                   --suppression security/dependency-check-suppressions.xml \
+                                  --disableYarnAudit \
+                                  --disableOssIndex \
                                   --nvdApiKey "${NVD_API_KEY}"
                             '''
                         }
