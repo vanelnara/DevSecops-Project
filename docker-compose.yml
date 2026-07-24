@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: devsecops-postgres
+    environment:
+      POSTGRES_DB: jenkins
+      POSTGRES_USER: jenkins
+      POSTGRES_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations/001_security_dashboard.sql:/docker-entrypoint-initdb.d/001_security_dashboard.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jenkins -d jenkins"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ingest-bridge:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    environment:
+      INGEST_PORT: 4200
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      JENKINS_DB_HOST: postgres
+      JENKINS_DB_PORT: 5432
+      JENKINS_DB_NAME: jenkins
+      JENKINS_DB_USER: jenkins
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+      AI_ANALYZER_URL: http://ai-analyzer:4300
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./services/ingest-bridge:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-analyzer:
+        condition: service_started
+
+  ai-analyzer:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    environment:
+      AI_PORT: 4300
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_MODEL: ${DEEPSEEK_MODEL:-deepseek-chat}
+      JENKINS_DB_HOST: postgres
+      JENKINS_DB_PORT: 5432
+      JENKINS_DB_NAME: jenkins
+      JENKINS_DB_USER: jenkins
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+    ports:
+      - "4300:4300"
+    volumes:
+      - ./services/ai-analyzer:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  security-dashboard:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run build && npm start"
+    environment:
+      DASHBOARD_API_PORT: 4100
+      JENKINS_DB_HOST: postgres
+      JENKINS_DB_PORT: 5432
+      JENKINS_DB_NAME: jenkins
+      JENKINS_DB_USER: jenkins
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+      AI_ANALYZER_URL: http://ai-analyzer:4300
+      DASHBOARD_MOCK_FALLBACK: "true"
+    ports:
+      - "4100:4100"
+    volumes:
+      - ./security-dashboard:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ai-analyzer:
+        condition: service_started
+
+volumes:
+  postgres_data:

@@ -15,6 +15,10 @@ pipeline {
         ARGOCD_APP_NAME    = 'devsecops-simple-shop'
         REPORTS_DIR        = 'reports'
         GIT_REPO           = 'https://github.com/vanelnara/DevSecops-Project.git'
+        // Security dashboard integration (override in Jenkins global/job env if needed)
+        INGEST_URL         = "${env.INGEST_URL ?: 'http://127.0.0.1:4200/ingest/build'}"
+        INGEST_TOKEN       = "${env.INGEST_TOKEN ?: ''}"
+        AI_ANALYZER_URL    = "${env.AI_ANALYZER_URL ?: 'http://127.0.0.1:4300'}"
     }
 
     options {
@@ -310,6 +314,62 @@ pipeline {
                             '''
                         }
                         logToPostgres('K8s Deploy', 'SUCCESS', "Deployed to namespace ${KUBE_NAMESPACE}")
+                    }
+                }
+            }
+        }
+
+        stage('Store Security Findings') {
+            steps {
+                script {
+                    runLoggedStage('Store Findings', 'Sending scanner reports to PostgreSQL via ingest bridge') {
+                        def publishStatus = currentBuild.currentResult ?: 'SUCCESS'
+                        withEnv([
+                            "STATUS=${publishStatus}",
+                            "BRANCH=${env.GIT_BRANCH ?: 'main'}",
+                            "COMMIT_SHA=${env.GIT_COMMIT ?: ''}",
+                            "IMAGE_TAG=${env.DOCKER_IMAGE}:${env.DOCKER_TAG}",
+                            "INGEST_URL=${env.INGEST_URL}",
+                            "INGEST_TOKEN=${env.INGEST_TOKEN ?: ''}",
+                        ]) {
+                            sh '''
+                                set -eu
+                                chmod +x scripts/publish-to-dashboard.sh
+                                export JOB_NAME="${JOB_NAME}"
+                                export BUILD_NUMBER="${BUILD_NUMBER}"
+                                export REPORTS_DIR="${REPORTS_DIR}"
+                                if [ -n "${BUILD_ID:-}" ]; then
+                                  START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
+                                  NOW_EPOCH="$(date +%s)"
+                                  if [ -n "${START_EPOCH:-}" ]; then
+                                    export DURATION_SECONDS="$((NOW_EPOCH - START_EPOCH))"
+                                  fi
+                                fi
+                                scripts/publish-to-dashboard.sh
+                            '''
+                        }
+                        logToPostgres('Store Findings', 'SUCCESS', "Stored findings for build ${env.BUILD_NUMBER} in PostgreSQL")
+                    }
+                }
+            }
+        }
+
+        stage('AI Security Analysis') {
+            steps {
+                script {
+                    runLoggedStage('AI Analysis', 'Sending stored findings/logs to DeepSeek AI analyzer') {
+                        withEnv([
+                            "AI_ANALYZER_URL=${env.AI_ANALYZER_URL}",
+                        ]) {
+                            sh '''
+                                set -eu
+                                chmod +x scripts/trigger-ai-analysis.sh
+                                export JOB_NAME="${JOB_NAME}"
+                                export BUILD_NUMBER="${BUILD_NUMBER}"
+                                scripts/trigger-ai-analysis.sh
+                            '''
+                        }
+                        logToPostgres('AI Analysis', 'SUCCESS', "AI analysis completed for build ${env.BUILD_NUMBER}")
                     }
                 }
             }
