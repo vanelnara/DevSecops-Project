@@ -15,10 +15,8 @@ pipeline {
         ARGOCD_APP_NAME    = 'devsecops-simple-shop'
         REPORTS_DIR        = 'reports'
         GIT_REPO           = 'https://github.com/vanelnara/DevSecops-Project.git'
-        // Security dashboard integration (override in Jenkins global/job env if needed)
         INGEST_URL         = "${env.INGEST_URL ?: 'http://127.0.0.1:4200/ingest/build'}"
         INGEST_TOKEN       = "${env.INGEST_TOKEN ?: ''}"
-        AI_ANALYZER_URL    = "${env.AI_ANALYZER_URL ?: 'http://127.0.0.1:4300'}"
     }
 
     options {
@@ -319,10 +317,10 @@ pipeline {
             }
         }
 
-        stage('Store Security Findings') {
+        stage('Publish to Security Dashboard') {
             steps {
                 script {
-                    runLoggedStage('Store Findings', 'Sending scanner reports to PostgreSQL via ingest bridge') {
+                    runLoggedStage('Dashboard Publish', 'Sending scanner reports to ingest bridge') {
                         def publishStatus = currentBuild.currentResult ?: 'SUCCESS'
                         withEnv([
                             "STATUS=${publishStatus}",
@@ -339,6 +337,7 @@ pipeline {
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
                                 export REPORTS_DIR="${REPORTS_DIR}"
                                 if [ -n "${BUILD_ID:-}" ]; then
+                                  # BUILD_ID is often yyyy-MM-dd_HH-mm-ss
                                   START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
                                   NOW_EPOCH="$(date +%s)"
                                   if [ -n "${START_EPOCH:-}" ]; then
@@ -348,28 +347,7 @@ pipeline {
                                 scripts/publish-to-dashboard.sh
                             '''
                         }
-                        logToPostgres('Store Findings', 'SUCCESS', "Stored findings for build ${env.BUILD_NUMBER} in PostgreSQL")
-                    }
-                }
-            }
-        }
-
-        stage('AI Security Analysis') {
-            steps {
-                script {
-                    runLoggedStage('AI Analysis', 'Sending stored findings/logs to DeepSeek AI analyzer') {
-                        withEnv([
-                            "AI_ANALYZER_URL=${env.AI_ANALYZER_URL}",
-                        ]) {
-                            sh '''
-                                set -eu
-                                chmod +x scripts/trigger-ai-analysis.sh
-                                export JOB_NAME="${JOB_NAME}"
-                                export BUILD_NUMBER="${BUILD_NUMBER}"
-                                scripts/trigger-ai-analysis.sh
-                            '''
-                        }
-                        logToPostgres('AI Analysis', 'SUCCESS', "AI analysis completed for build ${env.BUILD_NUMBER}")
+                        logToPostgres('Dashboard Publish', 'SUCCESS', "Published build ${env.BUILD_NUMBER} to ingest bridge")
                     }
                 }
             }
