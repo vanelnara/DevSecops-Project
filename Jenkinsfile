@@ -436,16 +436,17 @@ pipeline {
                             set -eu
                             chmod +x scripts/ensure-security-services.sh \
                                      scripts/ensure-ingest.sh \
+                                     scripts/ensure-ai.sh \
                                      scripts/apply-db-migrations.sh \
                                      scripts/publish-to-dashboard.sh \
                                      scripts/trigger-ai-analysis.sh \
                                      scripts/log-to-postgresql.sh
 
                             export INGEST_PORT="4200"
-                            export AI_PORT="${AI_PORT:-4300}"
+                            export AI_PORT="4300"
                             export DASHBOARD_API_PORT="${DASHBOARD_API_PORT:-4100}"
                             export INGEST_URL="http://127.0.0.1:4200/ingest/build"
-                            export AI_ANALYZER_URL="http://127.0.0.1:${AI_PORT}"
+                            export AI_ANALYZER_URL="http://127.0.0.1:4300"
                             export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
                             export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
                             export JENKINS_DB_HOST="127.0.0.1"
@@ -454,14 +455,17 @@ pipeline {
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
                             unset COMPOSE_DB_HOST || true
 
-                            # Ingest must work even if Docker compose stack fails.
+                            # Ingest + AI must work even if Docker compose stack fails.
                             scripts/ensure-ingest.sh
-                            scripts/ensure-security-services.sh || echo "WARN: full security stack start had issues; ingest is up"
+                            scripts/ensure-ai.sh
+                            scripts/ensure-security-services.sh || echo "WARN: full security stack start had issues; ingest+AI are up"
                             curl -sS "http://127.0.0.1:4200/health"
+                            echo
+                            curl -sS "http://127.0.0.1:4300/health"
                             echo
                             echo "Dashboard: http://127.0.0.1:${DASHBOARD_API_PORT}/ (admin/admin)"
                         '''
-                        logToPostgres('Start Services', 'SUCCESS', 'Ingest ready on 127.0.0.1:4200')
+                        logToPostgres('Start Services', 'SUCCESS', 'Ingest :4200 and AI :4300 ready')
                     }
                 }
             }
@@ -514,9 +518,15 @@ pipeline {
                         withEnv(["AI_ANALYZER_URL=${env.AI_ANALYZER_URL}"]) {
                             sh '''
                                 set -eu
-                                chmod +x scripts/trigger-ai-analysis.sh
+                                chmod +x scripts/trigger-ai-analysis.sh scripts/ensure-ai.sh
                                 export JOB_NAME="${JOB_NAME}"
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
+                                export AI_ANALYZER_URL="http://127.0.0.1:4300"
+                                export AI_PORT="4300"
+                                export JENKINS_DB_HOST="127.0.0.1"
+                                export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
+                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
+                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
                                 scripts/trigger-ai-analysis.sh
                             '''
                         }
