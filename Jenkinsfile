@@ -17,14 +17,13 @@ pipeline {
         ARGOCD_APP_NAME    = 'devsecops-simple-shop'
         REPORTS_DIR        = 'reports'
         GIT_REPO           = 'https://github.com/vanelnara/DevSecops-Project.git'
-        // Security dashboard stack (override via Jenkins global env if needed)
-        INGEST_URL         = "${env.INGEST_URL ?: 'http://127.0.0.1:4200/ingest/build'}"
+        // Always use agent-local ingest/AI (ignore Jenkins global INGEST_URL overrides)
+        INGEST_URL         = 'http://127.0.0.1:4200/ingest/build'
         INGEST_TOKEN       = "${env.INGEST_TOKEN ?: ''}"
-        AI_ANALYZER_URL    = "${env.AI_ANALYZER_URL ?: 'http://127.0.0.1:4300'}"
+        AI_ANALYZER_URL    = 'http://127.0.0.1:4300'
         DASHBOARD_API_PORT = "${env.DASHBOARD_API_PORT ?: '4100'}"
-        INGEST_PORT        = "${env.INGEST_PORT ?: '4200'}"
-        AI_PORT            = "${env.AI_PORT ?: '4300'}"
-        AI_PROVIDER        = 'huggingface'
+        INGEST_PORT        = '4200'
+        AI_PORT            = '4300'        AI_PROVIDER        = 'huggingface'
         HUGGINGFACE_MODEL  = "${env.HUGGINGFACE_MODEL ?: 'Qwen/Qwen2.5-7B-Instruct:fastest'}"
         // Jenkins Credentials (Secret text) — create these IDs in Jenkins UI
         JENKINS_DB_PASSWORD  = credentials('jenkins-db-password')
@@ -480,10 +479,12 @@ pipeline {
                         ]) {
                             sh '''
                                 set -eu
-                                chmod +x scripts/publish-to-dashboard.sh
+                                chmod +x scripts/publish-to-dashboard.sh scripts/ensure-security-services.sh
                                 export JOB_NAME="${JOB_NAME}"
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
                                 export REPORTS_DIR="${REPORTS_DIR}"
+                                export INGEST_URL="http://127.0.0.1:4200/ingest/build"
+                                export JENKINS_DB_HOST="127.0.0.1"
                                 if [ -n "${BUILD_ID:-}" ]; then
                                   START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
                                   NOW_EPOCH="$(date +%s)"

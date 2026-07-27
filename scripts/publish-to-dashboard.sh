@@ -3,6 +3,14 @@
 set -euo pipefail
 
 export INGEST_URL="${INGEST_URL:-http://127.0.0.1:4200/ingest/build}"
+# Ignore stale Jenkins global overrides that point at unreachable LAN IPs.
+case "${INGEST_URL}" in
+  http://127.0.0.1:*|http://localhost:*) ;;
+  *)
+    echo "WARN: overriding INGEST_URL=${INGEST_URL} -> http://127.0.0.1:4200/ingest/build"
+    export INGEST_URL="http://127.0.0.1:4200/ingest/build"
+    ;;
+esac
 export INGEST_TOKEN="${INGEST_TOKEN:-}"
 export JOB_NAME="${JOB_NAME:-${1:-Devops-project}}"
 export BUILD_NUMBER="${BUILD_NUMBER:-${2:-0}}"
@@ -69,14 +77,27 @@ fi
 
 echo "Publishing build ${JOB_NAME} #${BUILD_NUMBER} to ${INGEST_URL}"
 
-# Fail fast with a clear error if ingest cannot reach PostgreSQL.
 HEALTH_URL="$(echo "${INGEST_URL}" | sed -E 's#/ingest/build/?$##')/health"
 INGEST_HEALTH="$(curl --silent --show-error --max-time 5 "${HEALTH_URL}" || true)"
 echo "Preflight ${HEALTH_URL} => ${INGEST_HEALTH}"
+
 if ! echo "${INGEST_HEALTH}" | grep -q '"database":true'; then
-  echo "ERROR: ingest bridge is up but PostgreSQL is unreachable from that service."
-  echo "On the Jenkins host run: curl -s ${HEALTH_URL}"
-  echo "Expected database:true. If you see 172.17.0.1, recreate services with scripts/ensure-security-services.sh"
+  echo "WARN: ingest not ready — attempting to start security services..."
+  if [ -x scripts/ensure-security-services.sh ]; then
+    # shellcheck disable=SC1091
+    scripts/ensure-security-services.sh || true
+    sleep 2
+    INGEST_HEALTH="$(curl --silent --show-error --max-time 5 "${HEALTH_URL}" || true)"
+    echo "Retry preflight ${HEALTH_URL} => ${INGEST_HEALTH}"
+  fi
+fi
+
+if ! echo "${INGEST_HEALTH}" | grep -q '"database":true'; then
+  echo "ERROR: ingest bridge is not reachable with PostgreSQL on ${HEALTH_URL}"
+  echo "On the Jenkins agent run:"
+  echo "  docker ps -a | grep -E 'ingest|4200'"
+  echo "  curl -s http://127.0.0.1:4200/health"
+  echo "  scripts/ensure-security-services.sh"
   exit 1
 fi
 

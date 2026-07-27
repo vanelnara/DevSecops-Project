@@ -261,6 +261,6 @@ app.post(
   },
 );
 
-app.listen(port, () => {
-  console.log(`Security ingest bridge listening on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`Security ingest bridge listening on http://0.0.0.0:${port}`);
 });
