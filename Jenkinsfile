@@ -309,10 +309,31 @@ pipeline {
                                 argocd app sync "${ARGOCD_APP_NAME}" \
                                   --prune \
                                   --timeout 300
-                                argocd app wait "${ARGOCD_APP_NAME}" \
-                                  --sync \
-                                  --health \
-                                  --timeout 300
+
+                                # Sync often succeeds quickly; wait can fail if Argo CD API
+                                # briefly drops (connection refused). Retry, then fall back to kubectl.
+                                WAIT_OK=0
+                                for attempt in 1 2 3 4 5; do
+                                  echo "Argo CD wait attempt ${attempt}/5..."
+                                  if argocd app wait "${ARGOCD_APP_NAME}" \
+                                    --sync \
+                                    --health \
+                                    --timeout 60; then
+                                    WAIT_OK=1
+                                    break
+                                  fi
+                                  echo "Argo CD wait failed (attempt ${attempt}). Checking API and retrying..."
+                                  sleep 10
+                                  argocd login "${ARGOCD_SERVER}" \
+                                    --username admin \
+                                    --password "${ARGOCD_PASS}" \
+                                    --insecure \
+                                    --grpc-web || true
+                                done
+
+                                if [ "${WAIT_OK}" != "1" ]; then
+                                  echo "WARNING: argocd app wait did not complete. Falling back to kubectl rollout status."
+                                fi
 
                                 kubectl rollout status deployment/simple-shop \
                                   -n "${KUBE_NAMESPACE}" --timeout=180s
