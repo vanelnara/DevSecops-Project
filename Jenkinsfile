@@ -341,14 +341,14 @@ pipeline {
                                 # --- App 2: security-dashboard (separate) ---
                                 argocd app set devsecops-dashboard \
                                   --kustomize-image \
-                                  "${DASHBOARD_IMAGE}=${DASHBOARD_IMAGE}:${DOCKER_TAG}"
+                                  "${DASHBOARD_IMAGE}=${DASHBOARD_IMAGE}:${DOCKER_TAG}" || true
                                 argocd app sync devsecops-dashboard \
                                   --prune --force --timeout 300 || true
 
                                 # --- App 3: ai-analyzer (separate) ---
                                 argocd app set devsecops-ai-analyzer \
                                   --kustomize-image \
-                                  "${AI_IMAGE}=${AI_IMAGE}:${DOCKER_TAG}"
+                                  "${AI_IMAGE}=${AI_IMAGE}:${DOCKER_TAG}" || true
                                 argocd app sync devsecops-ai-analyzer \
                                   --prune --force --timeout 300 || true
 

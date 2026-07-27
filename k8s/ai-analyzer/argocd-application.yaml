@@ -6,7 +6,7 @@ metadata:
   labels:
     app.kubernetes.io/part-of: sentinelops
   finalizers:
-    - resources-finalizer.argocd.argoproj.io
+    - argocd.argoproj.io/resources-finalizer
 spec:
   project: default
   source:
