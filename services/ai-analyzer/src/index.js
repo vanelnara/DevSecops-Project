@@ -112,6 +112,12 @@ async function loadBuildContext(jobName, buildNumber) {
     `SELECT stage_name, status, duration_seconds, details
      FROM pipeline_stages
      WHERE job_name = $1 AND build_number = $2
+       AND stage_name NOT IN (
+         'AI Analysis',
+         'Store Findings',
+         'Start Services',
+         'Start Security Services'
+       )
      ORDER BY finished_at NULLS LAST, stage_name`,
     [jobName, buildNumber],
   );

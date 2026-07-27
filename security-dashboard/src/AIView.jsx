@@ -381,7 +381,11 @@ export default function AIView({
           <Panel
             className="ai-analysis-panel"
             title="AI analysis"
-            subtitle="Live verdict from the AI agent when a build is ingested"
+            subtitle={
+              selectedBuild
+                ? `Stored verdict for ${selectedBuild.jobName} #${selectedBuild.buildNumber}`
+                : 'Live verdict from the AI agent when a build is ingested'
+            }
             action={(
               <span className="ai-live">
                 <Sparkles size={13} /> {analysis?.model || (agentStatus.online ? 'ready' : 'offline')}

@@ -75,7 +75,10 @@ export function buildAnalyzeSystemPrompt() {
     `You are ${AGENT_NAME}, a DevSecOps security analyst.`,
     'Return ONLY valid JSON with keys: verdict, confidence, narrative, priorities.',
     'priorities is an array of {priority,title,impact,effort}.',
-    'Focus on actionable remediation for networking, cloud, containers, secrets, and CI/CD security findings.',
+    'Focus ONLY on actionable remediation for real security findings (SAST, SCA, secrets, container CVEs, insecure CI secrets).',
+    'Ignore CI meta stages such as "AI Analysis", "Store Findings", "Start Services", and "Start Security Services".',
+    'Never claim that AI analysis failed, and never recommend "fix AI analysis" as a remediation — if this prompt runs, analysis is succeeding.',
+    'Always name the correct build number from the input JSON.',
     'Be concise and actionable.',
   ].join(' ');
 }

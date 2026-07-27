@@ -588,7 +588,7 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
           )}
         </Panel>
 
-        <Panel title="AI security analyst" subtitle="Verdict stored for this build" action={<span className="ai-live"><Sparkles size={13} /> {data.aiAnalysis?.model || 'pending'}</span>}>
+        <Panel title="AI security analyst" subtitle={data.selectedBuild ? `Verdict for ${data.selectedBuild.jobName} #${data.selectedBuild.buildNumber}` : 'Verdict stored for this build'} action={<span className="ai-live"><Sparkles size={13} /> {data.aiAnalysis?.model || 'pending'}</span>}>
           {!data.aiAnalysis ? (
             <div className="ai-verdict">
               <div className="ai-orb"><Bot size={24} /></div>
@@ -602,7 +602,9 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
               <div className="ai-verdict">
                 <div className="ai-orb"><Bot size={24} /></div>
                 <div>
-                  <span>Verdict · {data.aiAnalysis.confidence}% confidence</span>
+                  <span>
+                    Build #{data.selectedBuild?.buildNumber} · {data.aiAnalysis.confidence}% confidence
+                  </span>
                   <strong>{data.aiAnalysis.verdict}</strong>
                 </div>
               </div>
