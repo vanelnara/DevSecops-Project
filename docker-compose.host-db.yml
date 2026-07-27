@@ -1,0 +1,57 @@
+# Standalone stack for Linux Jenkins agents where PostgreSQL listens on 127.0.0.1.
+# Host networking avoids ECONNREFUSED 172.17.0.1:5432 from bridge networking.
+name: devsecops-hostdb
+
+services:
+  ingest-bridge:
+    build:
+      context: ./services/ingest-bridge
+    image: devsecops-ingest-bridge:local
+    container_name: devsecops-ingest
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      INGEST_PORT: ${INGEST_PORT:-4200}
+      INGEST_TOKEN: ${INGEST_TOKEN:-}
+      JENKINS_DB_HOST: "127.0.0.1"
+      JENKINS_DB_PORT: ${JENKINS_DB_PORT:-5432}
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+      AI_ANALYZER_URL: http://127.0.0.1:${AI_PORT:-4300}
+
+  ai-analyzer:
+    build:
+      context: ./services/ai-analyzer
+    image: devsecops-ai-analyzer:local
+    container_name: devsecops-ai
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      AI_PORT: ${AI_PORT:-4300}
+      AI_PROVIDER: ${AI_PROVIDER:-huggingface}
+      HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
+      HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}
+      HUGGINGFACE_API_URL: ${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}
+      JENKINS_DB_HOST: "127.0.0.1"
+      JENKINS_DB_PORT: ${JENKINS_DB_PORT:-5432}
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+
+  security-dashboard:
+    build:
+      context: ./security-dashboard
+    image: devsecops-security-dashboard:local
+    container_name: devsecops-dashboard
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DASHBOARD_API_PORT: ${DASHBOARD_API_PORT:-4100}
+      JENKINS_DB_HOST: "127.0.0.1"
+      JENKINS_DB_PORT: ${JENKINS_DB_PORT:-5432}
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
+      JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
+      AI_ANALYZER_URL: http://127.0.0.1:${AI_PORT:-4300}
+      DASHBOARD_MOCK_FALLBACK: ${DASHBOARD_MOCK_FALLBACK:-false}

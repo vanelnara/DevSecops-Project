@@ -1,6 +1,6 @@
 import express from 'express';
 import multer from 'multer';
-import { query } from './db.js';
+import { query, dbHealthy } from './db.js';
 import {
   computeRiskScore,
   parseDependencyCheck,
@@ -160,8 +160,14 @@ async function triggerAiAnalysis(jobName, buildNumber) {
   }
 }
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'security-ingest-bridge' });
+app.get('/health', async (_req, res) => {
+  const database = await dbHealthy();
+  res.status(database ? 200 : 503).json({
+    status: database ? 'ok' : 'degraded',
+    service: 'security-ingest-bridge',
+    database,
+    dbHost: process.env.JENKINS_DB_HOST || '127.0.0.1',
+  });
 });
 
 app.post(
