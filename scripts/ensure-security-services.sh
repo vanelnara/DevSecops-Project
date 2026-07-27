@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Start security stack so ingest/AI/dashboard can reach the Jenkins PostgreSQL DB.
-# Falls back to host Node processes only when Docker is unavailable.
+# Start security stack so ingest can reach the Jenkins PostgreSQL on 127.0.0.1.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,8 +14,14 @@ JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
 JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
 : "${JENKINS_DB_PASSWORD:?JENKINS_DB_PASSWORD is required}"
 
-export JENKINS_DB_PASSWORD
-export JENKINS_DB_NAME JENKINS_DB_USER JENKINS_DB_PORT JENKINS_DB_HOST
+# Never inherit a bad bridge gateway host from Jenkins global env.
+unset COMPOSE_DB_HOST || true
+if [ "${JENKINS_DB_HOST}" = "host.docker.internal" ] || [ "${JENKINS_DB_HOST}" = "172.17.0.1" ]; then
+  echo "WARN: JENKINS_DB_HOST=${JENKINS_DB_HOST} is not reachable for local Postgres; forcing 127.0.0.1"
+  JENKINS_DB_HOST="127.0.0.1"
+fi
+
+export JENKINS_DB_PASSWORD JENKINS_DB_NAME JENKINS_DB_USER JENKINS_DB_PORT JENKINS_DB_HOST
 export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"
 export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
 export HUGGINGFACE_API_URL="${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}"
@@ -61,67 +66,74 @@ compose_cmd() {
   fi
 }
 
-primary_lan_ip() {
-  hostname -I 2>/dev/null | awk '{print $1}'
+free_port() {
+  local port="$1"
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "${pids}" ]; then
+      # shellcheck disable=SC2086
+      kill ${pids} 2>/dev/null || true
+      sleep 1
+      # shellcheck disable=SC2086
+      kill -9 ${pids} 2>/dev/null || true
+    fi
+  fi
 }
 
 start_with_docker() {
-  echo "=== Starting security stack with Docker Compose ==="
+  echo "=== Starting security stack with Docker ==="
   echo "Project: ${ROOT}"
+  echo "Host DB target: ${JENKINS_DB_HOST}:${JENKINS_DB_PORT}"
 
-  local compose_files=(-f docker-compose.yml)
+  local compose_file="docker-compose.yml"
   local profiles=()
-  local compose_db_host="postgres"
   local mode="compose-net"
 
-  if docker ps --format '{{.Names}}' | grep -qx 'devsecops-postgres'; then
+  # Linux + local Postgres => host networking (fixes ECONNREFUSED 172.17.0.1:5432)
+  if [ "$(uname -s)" = "Linux" ] && db_reachable "127.0.0.1" "${JENKINS_DB_PORT}"; then
+    compose_file="docker-compose.host-db.yml"
+    mode="host-net"
+    export COMPOSE_DB_HOST="127.0.0.1"
+    JENKINS_DB_HOST="127.0.0.1"
+    export JENKINS_DB_HOST
+    echo "Using host-network compose (${compose_file}) so containers reach Postgres on 127.0.0.1"
+  elif docker ps --format '{{.Names}}' | grep -qx 'devsecops-postgres'; then
     docker network create devsecops-net >/dev/null 2>&1 || true
     docker network connect --alias postgres devsecops-net devsecops-postgres >/dev/null 2>&1 || true
-    compose_db_host="postgres"
+    export COMPOSE_DB_HOST="postgres"
     mode="compose-net"
-    echo "Using existing container devsecops-postgres on network devsecops-net"
-  elif db_reachable "127.0.0.1" "${JENKINS_DB_PORT}" || { [ "${JENKINS_DB_HOST}" != "127.0.0.1" ] && db_reachable; }; then
-    # Host Postgres is up. On Linux use host networking so DB is 127.0.0.1
-    # (bridge host.docker.internal -> 172.17.0.1 fails when Postgres listens on localhost only).
-    if [ "$(uname -s)" = "Linux" ]; then
-      compose_files=(-f docker-compose.host-db.yml)
-      compose_db_host="127.0.0.1"
-      mode="host-net"
-      echo "Host PostgreSQL detected — using host networking (DB 127.0.0.1:${JENKINS_DB_PORT})"
-    else
-      compose_db_host="host.docker.internal"
-      mode="compose-net"
-      echo "Host PostgreSQL detected — using host.docker.internal"
-    fi
-  else
-    echo "No PostgreSQL on ${JENKINS_DB_HOST}:${JENKINS_DB_PORT} — starting compose postgres (profile with-db)"
+    echo "Using existing devsecops-postgres on devsecops-net"
+  elif ! db_reachable; then
+    echo "No PostgreSQL reachable — starting compose postgres (profile with-db)"
     profiles+=(--profile with-db)
-    compose_db_host="postgres"
+    export COMPOSE_DB_HOST="postgres"
     mode="compose-net"
+  else
+    # Non-Linux Docker Desktop
+    export COMPOSE_DB_HOST="host.docker.internal"
+    mode="compose-net"
+    echo "Using bridge compose with host.docker.internal"
   fi
 
-  export COMPOSE_DB_HOST="${compose_db_host}"
-
-  # Stop any previous bridge-mode containers that may still bind the ports
+  echo "Stopping any previous ingest/ai/dashboard containers and freeing ports..."
   docker rm -f devsecops-ingest devsecops-ai devsecops-dashboard >/dev/null 2>&1 || true
+  # Also remove old compose project containers if present
+  compose_cmd -f docker-compose.yml down --remove-orphans >/dev/null 2>&1 || true
+  compose_cmd -f docker-compose.host-db.yml down --remove-orphans >/dev/null 2>&1 || true
+  free_port "${INGEST_PORT}"
+  free_port "${AI_PORT}"
+  free_port "${DASHBOARD_PORT}"
 
-  # Recreate so DB host / network mode changes always apply
   # shellcheck disable=SC2086
-  compose_cmd "${compose_files[@]}" "${profiles[@]}" up -d --build --force-recreate \
+  compose_cmd -f "${compose_file}" "${profiles[@]}" up -d --build --force-recreate \
     ingest-bridge ai-analyzer security-dashboard
 
   if [ "${#profiles[@]}" -gt 0 ]; then
-    compose_cmd "${compose_files[@]}" --profile with-db up -d postgres
-    local i=1
-    while [ "${i}" -le 30 ]; do
-      status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' devsecops-postgres 2>/dev/null || true)"
-      if [ "${status}" = "healthy" ] || [ "${status}" = "running" ]; then
-        echo "postgres container status: ${status}"
-        break
-      fi
-      sleep 2
-      i=$((i + 1))
-    done
+    compose_cmd -f "${compose_file}" --profile with-db up -d postgres
   fi
 
   chmod +x scripts/apply-db-migrations.sh
@@ -132,26 +144,22 @@ start_with_docker() {
   wait_url "ai-analyzer" "http://127.0.0.1:${AI_PORT}/health"
   wait_url "security-dashboard" "http://127.0.0.1:${DASHBOARD_PORT}/api/health"
 
-  # Prove ingest can talk to Postgres (the failure mode behind ECONNREFUSED 172.17.0.1:5432)
-  echo "Verifying ingest DB connectivity..."
+  echo "Container DB env (should be 127.0.0.1 on Linux host-net):"
+  docker inspect -f '{{.Name}} JENKINS_DB_HOST={{range .Config.Env}}{{println .}}{{end}}' devsecops-ingest 2>/dev/null \
+    | grep -E 'JENKINS_DB_HOST|Name=' || true
+
   ingest_health="$(curl --silent --show-error --max-time 5 "http://127.0.0.1:${INGEST_PORT}/health" || true)"
   echo "ingest /health => ${ingest_health}"
   if ! echo "${ingest_health}" | grep -q '"database":true'; then
-    echo "ERROR: ingest-bridge cannot reach PostgreSQL. Check JENKINS_DB_* and docker logs for devsecops-ingest."
-    docker logs --tail 50 devsecops-ingest || true
+    echo "ERROR: ingest-bridge cannot reach PostgreSQL."
+    docker logs --tail 80 devsecops-ingest || true
     exit 1
   fi
 
-  echo "=== Security stack is up (mode=${mode}, COMPOSE_DB_HOST=${COMPOSE_DB_HOST}) ==="
-  compose_cmd "${compose_files[@]}" ps || true
-  echo "Dashboard: http://127.0.0.1:${DASHBOARD_PORT}/  (login admin/admin)"
+  echo "=== Security stack is up (mode=${mode}) ==="
+  echo "Dashboard: http://127.0.0.1:${DASHBOARD_PORT}/  (admin/admin)"
   echo "Ingest:    http://127.0.0.1:${INGEST_PORT}/health"
   echo "AI:        http://127.0.0.1:${AI_PORT}/health"
-  if [ "${mode}" = "host-net" ]; then
-    echo "Troubleshoot: docker logs -f devsecops-ingest devsecops-ai devsecops-dashboard"
-  else
-    echo "Troubleshoot: docker compose logs -f security-dashboard ai-analyzer ingest-bridge"
-  fi
 }
 
 start_with_node_fallback() {
@@ -190,7 +198,8 @@ start_with_node_fallback() {
     npm_prepare "${dir}"
     (
       cd "${dir}"
-      export JENKINS_DB_HOST JENKINS_DB_PORT JENKINS_DB_NAME JENKINS_DB_USER JENKINS_DB_PASSWORD
+      export JENKINS_DB_HOST=127.0.0.1
+      export JENKINS_DB_PORT JENKINS_DB_NAME JENKINS_DB_USER JENKINS_DB_PASSWORD
       export INGEST_PORT AI_PORT DASHBOARD_API_PORT
       export AI_ANALYZER_URL="${AI_ANALYZER_URL:-http://127.0.0.1:${AI_PORT}}"
       export HUGGINGFACE_API_KEY HUGGINGFACE_MODEL HUGGINGFACE_API_URL AI_PROVIDER
@@ -200,6 +209,10 @@ start_with_node_fallback() {
     )
     wait_url "${name}" "${health_url}"
   }
+
+  free_port "${INGEST_PORT}"
+  free_port "${AI_PORT}"
+  free_port "${DASHBOARD_PORT}"
 
   start_bg ingest-bridge "${ROOT}/services/ingest-bridge" "node src/index.js" "http://127.0.0.1:${INGEST_PORT}/health"
   start_bg ai-analyzer "${ROOT}/services/ai-analyzer" "node src/index.js" "http://127.0.0.1:${AI_PORT}/health"

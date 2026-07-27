@@ -443,24 +443,23 @@ pipeline {
                             export INGEST_PORT="${INGEST_PORT}"
                             export AI_PORT="${AI_PORT}"
                             export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
-                            # Host-published ports so Jenkins steps can reach the Docker network services
-                            export INGEST_URL="${INGEST_URL:-http://127.0.0.1:${INGEST_PORT}/ingest/build}"
-                            export AI_ANALYZER_URL="${AI_ANALYZER_URL:-http://127.0.0.1:${AI_PORT}}"
+                            # Prefer localhost for publish/AI so we hit the services started on this agent.
+                            export INGEST_URL="http://127.0.0.1:${INGEST_PORT}/ingest/build"
+                            export AI_ANALYZER_URL="http://127.0.0.1:${AI_PORT}"
                             export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
                             export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
-                            export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
+                            export JENKINS_DB_HOST="127.0.0.1"
                             export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
                             export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
-                            # JENKINS_DB_PASSWORD + HUGGINGFACE_API_KEY from Jenkins credentials()
-                            # Stack runs in Docker on network devsecops-net (postgres/ingest/ai/dashboard).
+                            unset COMPOSE_DB_HOST || true
 
                             scripts/ensure-security-services.sh
-                            echo "Docker network: devsecops-net"
+                            curl -sS "http://127.0.0.1:${INGEST_PORT}/health"
+                            echo
                             echo "Dashboard: http://127.0.0.1:${DASHBOARD_API_PORT:-4100}/ (admin/admin)"
-                            docker compose ps || true
                         '''
-                        logToPostgres('Start Services', 'SUCCESS', 'Docker security stack up on devsecops-net')
+                        logToPostgres('Start Services', 'SUCCESS', 'Security stack up with host Postgres access')
                     }
                 }
             }
@@ -476,7 +475,7 @@ pipeline {
                             "BRANCH=${env.GIT_BRANCH ?: 'main'}",
                             "COMMIT_SHA=${env.GIT_COMMIT ?: ''}",
                             "IMAGE_TAG=${env.DOCKER_IMAGE}:${env.DOCKER_TAG}",
-                            "INGEST_URL=${env.INGEST_URL}",
+                            "INGEST_URL=http://127.0.0.1:${env.INGEST_PORT ?: '4200'}/ingest/build",
                             "INGEST_TOKEN=${env.INGEST_TOKEN ?: ''}",
                         ]) {
                             sh '''

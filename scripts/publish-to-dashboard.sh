@@ -68,6 +68,18 @@ if [ -n "${OWASP_JSON}" ] && [ -f "${OWASP_JSON}" ]; then
 fi
 
 echo "Publishing build ${JOB_NAME} #${BUILD_NUMBER} to ${INGEST_URL}"
+
+# Fail fast with a clear error if ingest cannot reach PostgreSQL.
+HEALTH_URL="$(echo "${INGEST_URL}" | sed -E 's#/ingest/build/?$##')/health"
+INGEST_HEALTH="$(curl --silent --show-error --max-time 5 "${HEALTH_URL}" || true)"
+echo "Preflight ${HEALTH_URL} => ${INGEST_HEALTH}"
+if ! echo "${INGEST_HEALTH}" | grep -q '"database":true'; then
+  echo "ERROR: ingest bridge is up but PostgreSQL is unreachable from that service."
+  echo "On the Jenkins host run: curl -s ${HEALTH_URL}"
+  echo "Expected database:true. If you see 172.17.0.1, recreate services with scripts/ensure-security-services.sh"
+  exit 1
+fi
+
 RESPONSE="$(curl "${CURL_ARGS[@]}")"
 echo "${RESPONSE}"
 echo "${RESPONSE}" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'
