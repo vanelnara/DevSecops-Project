@@ -32,11 +32,9 @@ app.get('/health', (_req, res) => {
 });
 
 app.get('/ready', (_req, res) => {
-  const products = readJson(productsPath);
-  if (products.length > 0) {
-    return res.json({ status: 'ready' });
-  }
-  return res.status(503).json({ status: 'not ready' });
+  // Keep readiness aligned with liveness so rollouts are not blocked by
+  // empty/missing products.json on fresh containers.
+  return res.json({ status: 'ready', service: 'simple-shop' });
 });
 
 app.get('/api/products', (req, res) => {

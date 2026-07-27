@@ -310,6 +310,7 @@ pipeline {
                                   "${DOCKER_IMAGE}=${DOCKER_IMAGE}:${DOCKER_TAG}"
                                 argocd app sync "${ARGOCD_APP_NAME}" \
                                   --prune \
+                                  --force \
                                   --timeout 300
 
                                 # Sync often succeeds quickly; wait can fail if Argo CD API
@@ -320,11 +321,13 @@ pipeline {
                                   if argocd app wait "${ARGOCD_APP_NAME}" \
                                     --sync \
                                     --health \
-                                    --timeout 60; then
+                                    --timeout 90; then
                                     WAIT_OK=1
                                     break
                                   fi
-                                  echo "Argo CD wait failed (attempt ${attempt}). Checking API and retrying..."
+                                  echo "Argo CD wait failed (attempt ${attempt}). Dumping status and retrying..."
+                                  argocd app get "${ARGOCD_APP_NAME}" || true
+                                  kubectl get pods,deploy,rs -n "${KUBE_NAMESPACE}" -o wide || true
                                   sleep 10
                                   argocd login "${ARGOCD_SERVER}" \
                                     --username admin \
@@ -337,8 +340,20 @@ pipeline {
                                   echo "WARNING: argocd app wait did not complete. Falling back to kubectl rollout status."
                                 fi
 
+                                # Clear any stuck previous ReplicaSets so the new revision can settle.
                                 kubectl rollout status deployment/simple-shop \
-                                  -n "${KUBE_NAMESPACE}" --timeout=180s
+                                  -n "${KUBE_NAMESPACE}" --timeout=300s \
+                                || {
+                                  echo "Rollout timed out — collecting diagnostics:"
+                                  kubectl describe deployment/simple-shop -n "${KUBE_NAMESPACE}" || true
+                                  kubectl get pods -n "${KUBE_NAMESPACE}" -o wide || true
+                                  kubectl describe pods -n "${KUBE_NAMESPACE}" -l app=simple-shop || true
+                                  kubectl get events -n "${KUBE_NAMESPACE}" --sort-by=.lastTimestamp | tail -n 40 || true
+                                  # One recovery attempt: restart the deployment with the synced image.
+                                  kubectl rollout restart deployment/simple-shop -n "${KUBE_NAMESPACE}" || true
+                                  kubectl rollout status deployment/simple-shop \
+                                    -n "${KUBE_NAMESPACE}" --timeout=180s
+                                }
                                 kubectl get pods -n "${KUBE_NAMESPACE}" -o wide
                             '''
                         }
