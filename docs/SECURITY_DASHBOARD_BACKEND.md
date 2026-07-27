@@ -42,7 +42,7 @@ cd security-dashboard && npm run dev
 
 1. Create a token at https://huggingface.co/settings/tokens  
 2. Set `HUGGINGFACE_API_KEY` in Jenkins credential ID `huggingface-api-key`  
-3. Model default: `mistralai/Mistral-7B-Instruct-v0.3`  
+3. Model default: `Qwen/Qwen2.5-7B-Instruct:fastest`  
 4. API: `https://router.huggingface.co/v1/chat/completions`
 
 ## 4. Tables

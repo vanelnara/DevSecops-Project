@@ -368,7 +368,7 @@ pipeline {
                             export INGEST_URL="${INGEST_URL}"
                             export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
                             export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
-                            export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
+                            export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
                             export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
                             export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
                             export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"

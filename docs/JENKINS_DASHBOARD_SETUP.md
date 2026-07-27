@@ -44,7 +44,7 @@ AI_PROVIDER         = 'huggingface'
 |------|---------|
 | `INGEST_URL` | `http://192.168.10.147:4200/ingest/build` |
 | `AI_ANALYZER_URL` | `http://127.0.0.1:4300` |
-| `HUGGINGFACE_MODEL` | `mistralai/Mistral-7B-Instruct-v0.3` |
+| `HUGGINGFACE_MODEL` | `Qwen/Qwen2.5-7B-Instruct:fastest` |
 
 ### 3. Apply DB migration once
 
