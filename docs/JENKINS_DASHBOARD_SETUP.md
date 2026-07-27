@@ -9,7 +9,7 @@ After **Deploy to Kubernetes**:
    - ai-analyzer `:4300`
    - security-dashboard `:4100`
 2. **Store Security Findings** — uploads scanner reports → PostgreSQL  
-3. **AI Security Analysis** — DeepSeek analyzes stored findings  
+3. **AI Security Analysis** — Hugging Face analyzes stored findings  
 
 Open dashboard: `http://<jenkins-host>:4100`
 
@@ -24,56 +24,40 @@ Services keep running after the build (`nohup`). Next builds skip restart if hea
 | Credential ID | Secret value | Used as |
 |---------------|--------------|---------|
 | **`jenkins-db-password`** | Postgres password for user `jenkins` | `JENKINS_DB_PASSWORD` |
-| **`deepseek-api-key`** | DeepSeek API key | `DEEPSEEK_API_KEY` |
+| **`huggingface-api-key`** | Hugging Face token | `HUGGINGFACE_API_KEY` |
 
 Jenkins UI: **Manage Jenkins → Credentials → (global) → Add Credentials → Secret text**
+
+Create the HF token at https://huggingface.co/settings/tokens
 
 The Jenkinsfile binds them with:
 
 ```groovy
 JENKINS_DB_PASSWORD = credentials('jenkins-db-password')
-DEEPSEEK_API_KEY    = credentials('deepseek-api-key')
+HUGGINGFACE_API_KEY = credentials('huggingface-api-key')
+AI_PROVIDER         = 'huggingface'
 ```
 
 ### 2. Optional non-secret env vars
 
 | Name | Example |
 |------|---------|
-| `JENKINS_DB_HOST` | `127.0.0.1` |
-| `JENKINS_DB_PORT` | `5432` |
-| `JENKINS_DB_NAME` | `jenkins` |
-| `JENKINS_DB_USER` | `jenkins` |
-| `INGEST_URL` | `http://127.0.0.1:4200/ingest/build` |
+| `INGEST_URL` | `http://192.168.10.147:4200/ingest/build` |
 | `AI_ANALYZER_URL` | `http://127.0.0.1:4300` |
+| `HUGGINGFACE_MODEL` | `mistralai/Mistral-7B-Instruct-v0.3` |
 
-### 3. Apply DB schema once
+### 3. Apply DB migration once
 
 ```bash
-export PGPASSWORD="$JENKINS_DB_PASSWORD"
-psql -h 127.0.0.1 -U jenkins -d jenkins \
-  -f /path/to/DevSecops-Project/db/migrations/001_security_dashboard.sql
+psql -h 127.0.0.1 -U jenkins -d jenkins -f db/migrations/001_security_dashboard.sql
 ```
-
-### 4. Agent requirements
-
-Jenkins agent needs: `node`, `npm`, `curl`, `python3`, `psql`, `nohup`.
 
 ---
 
-## Script used by the pipeline
-
-`scripts/ensure-security-services.sh`
-
-- Starts services **one after another**
-- Skips if already healthy (avoids “port in use” errors)
-- Logs: `~/.devsecops-services/logs/*.log`
-- PIDs: `~/.devsecops-services/pids/*.pid`
-
-Manual test as Jenkins user:
+## Local manual start
 
 ```bash
 export JENKINS_DB_PASSWORD='...'
-export DEEPSEEK_API_KEY='...'
-cd /var/lib/jenkins/workspace/Devops-project   # or your checkout
-bash scripts/ensure-security-services.sh
+export HUGGINGFACE_API_KEY='hf_...'
+scripts/ensure-security-services.sh
 ```

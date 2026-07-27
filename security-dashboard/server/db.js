@@ -11,13 +11,15 @@ const {
 
 export const pool = new pg.Pool(
   DATABASE_URL
-    ? { connectionString: DATABASE_URL }
+    ? { connectionString: DATABASE_URL, connectionTimeoutMillis: 3000, idleTimeoutMillis: 5000 }
     : {
         host: JENKINS_DB_HOST,
         port: Number(JENKINS_DB_PORT),
         database: JENKINS_DB_NAME,
         user: JENKINS_DB_USER,
         password: JENKINS_DB_PASSWORD,
+        connectionTimeoutMillis: 3000,
+        idleTimeoutMillis: 5000,
       },
 );
 

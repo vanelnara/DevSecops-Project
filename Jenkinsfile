@@ -22,9 +22,11 @@ pipeline {
         DASHBOARD_API_PORT = "${env.DASHBOARD_API_PORT ?: '4100'}"
         INGEST_PORT        = "${env.INGEST_PORT ?: '4200'}"
         AI_PORT            = "${env.AI_PORT ?: '4300'}"
+        AI_PROVIDER        = 'huggingface'
+        HUGGINGFACE_MODEL  = "${env.HUGGINGFACE_MODEL ?: 'mistralai/Mistral-7B-Instruct-v0.3'}"
         // Jenkins Credentials (Secret text) — create these IDs in Jenkins UI
-        JENKINS_DB_PASSWORD = credentials('jenkins-db-password')
-        DEEPSEEK_API_KEY    = credentials('deepseek-api-key')
+        JENKINS_DB_PASSWORD  = credentials('jenkins-db-password')
+        HUGGINGFACE_API_KEY  = credentials('huggingface-api-key')
     }
 
     options {
@@ -351,8 +353,8 @@ pipeline {
                 script {
                     runLoggedStage('Start Services', 'Starting ingest, AI analyzer, and dashboard in background') {
                         // Uses pipeline credentials:
-                        //   jenkins-db-password  -> JENKINS_DB_PASSWORD
-                        //   deepseek-api-key     -> DEEPSEEK_API_KEY
+                        //   jenkins-db-password   -> JENKINS_DB_PASSWORD
+                        //   huggingface-api-key   -> HUGGINGFACE_API_KEY
                         sh '''
                             set -eu
                             chmod +x scripts/ensure-security-services.sh \
@@ -365,11 +367,13 @@ pipeline {
                             export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
                             export INGEST_URL="${INGEST_URL}"
                             export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
+                            export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
+                            export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
                             export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
                             export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
                             export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
-                            # JENKINS_DB_PASSWORD and DEEPSEEK_API_KEY come from Jenkins credentials()
+                            # JENKINS_DB_PASSWORD and HUGGINGFACE_API_KEY come from Jenkins credentials()
 
                             scripts/ensure-security-services.sh
                         '''
@@ -417,7 +421,7 @@ pipeline {
         stage('AI Security Analysis') {
             steps {
                 script {
-                    runLoggedStage('AI Analysis', 'Sending stored findings to DeepSeek AI analyzer') {
+                    runLoggedStage('AI Analysis', 'Sending stored findings to Hugging Face AI analyzer') {
                         withEnv(["AI_ANALYZER_URL=${env.AI_ANALYZER_URL}"]) {
                             sh '''
                                 set -eu

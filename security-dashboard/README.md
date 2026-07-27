@@ -1,45 +1,43 @@
 # SentinelOps Security Dashboard
 
-A React and Express dashboard for visualizing DevSecOps pipeline health,
-security findings, scanner coverage, deployment activity, and AI-assisted
-remediation.
+React + Express dashboard that visualizes **real Jenkins pipeline security results** from PostgreSQL.
 
-The current version uses realistic mock API data. PostgreSQL ingestion and a
-real AI provider are intentionally isolated behind the API so they can be
-connected in the next phase without redesigning the frontend.
+There is **no mock data**. Until builds are ingested, the UI shows empty states.
 
 ## Run locally
 
 ```bash
 npm install
+export JENKINS_DB_HOST=127.0.0.1
+export JENKINS_DB_PASSWORD='your-db-password'
+export AI_ANALYZER_URL=http://127.0.0.1:4300
 npm run dev
 ```
 
-- Dashboard: `http://localhost:5173`
-- API health: `http://localhost:4100/api/health`
+- UI: http://localhost:5173  
+- API: http://localhost:4100  
 
-Set Postgres + AI env vars (see `../.env.example` and `../docs/SECURITY_DASHBOARD_BACKEND.md`).
-When builds exist in PostgreSQL, `/api/dashboard` serves live data. Otherwise it falls back to mock data.
+## Interactive views
 
-## Production build
+- **Security overview** — risk, trend, alerts for the selected build  
+- **Pipelines** — all ingested builds, status filter, click for stage/finding detail  
+- **Findings** — severity/status/source filters, status updates saved to Postgres  
+- **AI investigations** — Hugging Face verdict + security copilot chat against the selected build  
 
-```bash
-npm run build
-npm start
-```
+## API
 
-The Express server serves the generated React application on port `4100`.
-Set `DASHBOARD_API_PORT` to use another port.
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/health` | API + DB health |
+| GET | `/api/dashboard?job=&build=` | Overview payload for a build |
+| GET | `/api/builds` | List ingested builds |
+| GET | `/api/builds/:job/:build` | Build detail (stages, findings, AI) |
+| GET | `/api/findings?...` | Filtered findings |
+| PATCH | `/api/findings/:id` | Update finding status |
+| GET | `/api/activity` | Activity feed |
+| POST | `/api/ai/chat` | Chat via AI analyzer |
+| POST | `/api/ai/analyze` | Re-run AI analysis |
 
-## API boundary
+## Data source
 
-- `GET /api/dashboard` — aggregated pipeline, finding, control, and AI data (Postgres-backed)
-- `POST /api/ai/chat` — proxies to the DeepSeek AI analyzer service
-- `GET /api/health` — backend + database health check
-
-## Backend services
-
-- `services/ingest-bridge` — Jenkins report ingest on `:4200`
-- `services/ai-analyzer` — DeepSeek analysis on `:4300`
-- `db/migrations/001_security_dashboard.sql` — schema on the shared `jenkins` database
-
+Filled by Jenkins stages **Store Security Findings** and **AI Security Analysis** through `services/ingest-bridge` into the shared `jenkins` PostgreSQL database.

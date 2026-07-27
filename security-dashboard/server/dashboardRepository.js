@@ -7,7 +7,7 @@ const severityColors = {
   Low: '#38bdf8',
 };
 
-function formatDuration(totalSeconds) {
+export function formatDuration(totalSeconds) {
   const seconds = Number(totalSeconds || 0);
   if (!seconds) return '—';
   const mins = Math.floor(seconds / 60);
@@ -16,7 +16,7 @@ function formatDuration(totalSeconds) {
   return `${mins}m ${String(secs).padStart(2, '0')}s`;
 }
 
-function relativeTime(dateValue) {
+export function relativeTime(dateValue) {
   if (!dateValue) return '—';
   const date = new Date(dateValue);
   const diffMs = Date.now() - date.getTime();
@@ -35,110 +35,322 @@ function shortCommit(sha) {
   return String(sha).slice(0, 7);
 }
 
-async function getLatestBuild() {
-  const result = await query(
-    `SELECT * FROM security_builds
-     ORDER BY finished_at DESC NULLS LAST, build_number DESC
-     LIMIT 1`,
-  );
-  return result.rows[0] || null;
+function mapBuild(row, findingsCount = 0) {
+  return {
+    id: row.build_number,
+    jobName: row.job_name,
+    name: row.job_name,
+    branch: row.branch || 'main',
+    commit: shortCommit(row.commit_sha),
+    commitSha: row.commit_sha,
+    status: row.status,
+    risk: row.risk_score,
+    duration: formatDuration(row.duration_seconds),
+    durationSeconds: row.duration_seconds,
+    findings: findingsCount,
+    triggeredBy: row.triggered_by || 'jenkins',
+    finishedAt: relativeTime(row.finished_at),
+    finishedAtRaw: row.finished_at,
+    startedAtRaw: row.started_at,
+    imageTag: row.image_tag,
+  };
 }
 
-async function getBuilds(limit = 8) {
-  const result = await query(
-    `SELECT * FROM security_builds
-     ORDER BY build_number DESC
-     LIMIT $1`,
-    [limit],
-  );
-  return result.rows;
+function mapFinding(row) {
+  return {
+    id: row.id,
+    findingKey: row.finding_key,
+    severity: row.severity,
+    title: row.title,
+    source: row.source,
+    asset: row.asset || 'n/a',
+    status: row.status,
+    confidence: row.confidence,
+    jobName: row.job_name,
+    buildNumber: row.build_number,
+    pipeline: `${row.job_name} #${row.build_number}`,
+    age: relativeTime(row.created_at),
+    createdAt: row.created_at,
+    raw: row.raw || {},
+  };
 }
 
-async function getFindings(jobName, buildNumber) {
+export function emptyDashboardPayload(reason = '') {
+  const emptyControls = [
+    { name: 'SAST', tool: 'SonarQube', status: 'passing', coverage: 0, findings: 0 },
+    { name: 'SCA', tool: 'OWASP Dependency-Check', status: 'passing', coverage: 0, findings: 0 },
+    { name: 'Secrets', tool: 'Gitleaks', status: 'passing', coverage: 0, findings: 0 },
+    { name: 'Container', tool: 'Trivy', status: 'passing', coverage: 0, findings: 0 },
+    { name: 'Signing', tool: 'Cosign', status: 'passing', coverage: 0, findings: 0 },
+    { name: 'Deployment', tool: 'Argo CD', status: 'passing', coverage: 0, findings: 0 },
+  ];
+
+  return {
+    generatedAt: new Date().toISOString(),
+    organization: 'DevSecOps Lab',
+    dataMode: 'empty',
+    waitingReason: reason || 'Waiting for the next Jenkins pipeline ingest',
+    summary: {
+      riskScore: 0,
+      riskDelta: 0,
+      totalFindings: 0,
+      critical: 0,
+      high: 0,
+      medium: 0,
+      low: 0,
+      blockedBuilds: 0,
+      meanTimeToResolve: '—',
+      coverage: 0,
+      totalBuilds: 0,
+    },
+    severity: [
+      { name: 'Critical', value: 0, color: severityColors.Critical },
+      { name: 'High', value: 0, color: severityColors.High },
+      { name: 'Medium', value: 0, color: severityColors.Medium },
+      { name: 'Low', value: 0, color: severityColors.Low },
+    ],
+    trend: [
+      { day: 'Mon', critical: 0, high: 0, medium: 0 },
+      { day: 'Tue', critical: 0, high: 0, medium: 0 },
+      { day: 'Wed', critical: 0, high: 0, medium: 0 },
+      { day: 'Thu', critical: 0, high: 0, medium: 0 },
+      { day: 'Fri', critical: 0, high: 0, medium: 0 },
+      { day: 'Sat', critical: 0, high: 0, medium: 0 },
+      { day: 'Sun', critical: 0, high: 0, medium: 0 },
+    ],
+    pipelinePerformance: [
+      { stage: 'Checkout', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Unit Tests', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'SAST', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'OWASP', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Gitleaks', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Build', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Trivy', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Cosign', duration: 0, baseline: 1, status: 'WAITING' },
+      { stage: 'Deploy', duration: 0, baseline: 1, status: 'WAITING' },
+    ],
+    pipelines: [],
+    alerts: [],
+    controls: emptyControls,
+    aiAnalysis: null,
+    activity: [],
+    selectedBuild: null,
+  };
+}
+
+async function findingCountsByBuild(jobName, buildNumbers) {
+  if (!buildNumbers.length) return {};
+  const result = await query(
+    `SELECT build_number, COUNT(*)::int AS count
+     FROM findings
+     WHERE job_name = $1 AND build_number = ANY($2::int[])
+     GROUP BY build_number`,
+    [jobName, buildNumbers],
+  );
+  return Object.fromEntries(result.rows.map((row) => [row.build_number, row.count]));
+}
+
+export async function listBuilds({ limit = 50, status } = {}) {
+  const params = [];
+  let sql = `SELECT * FROM security_builds`;
+  if (status) {
+    params.push(status);
+    sql += ` WHERE status = $${params.length}`;
+  }
+  params.push(Math.min(Number(limit) || 50, 200));
+  sql += ` ORDER BY build_number DESC LIMIT $${params.length}`;
+  const result = await query(sql, params);
+  if (!result.rows.length) return [];
+
+  const byJob = new Map();
+  for (const row of result.rows) {
+    if (!byJob.has(row.job_name)) byJob.set(row.job_name, []);
+    byJob.get(row.job_name).push(row.build_number);
+  }
+
+  const countMap = {};
+  for (const [jobName, builds] of byJob.entries()) {
+    Object.assign(countMap, Object.fromEntries(
+      Object.entries(await findingCountsByBuild(jobName, builds)).map(([bn, count]) => [`${jobName}:${bn}`, count]),
+    ));
+  }
+
+  return result.rows.map((row) => mapBuild(row, countMap[`${row.job_name}:${row.build_number}`] || 0));
+}
+
+export async function getBuildDetail(jobName, buildNumber) {
+  const buildResult = await query(
+    `SELECT * FROM security_builds WHERE job_name = $1 AND build_number = $2`,
+    [jobName, buildNumber],
+  );
+  const build = buildResult.rows[0];
+  if (!build) return null;
+
+  const [findings, stages, ai, activity, count] = await Promise.all([
+    query(
+      `SELECT * FROM findings
+       WHERE job_name = $1 AND build_number = $2
+       ORDER BY CASE severity
+         WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+         created_at DESC`,
+      [jobName, buildNumber],
+    ),
+    query(
+      `SELECT stage_name, status, duration_seconds, details, started_at, finished_at
+       FROM pipeline_stages
+       WHERE job_name = $1 AND build_number = $2
+       ORDER BY finished_at NULLS LAST, stage_name`,
+      [jobName, buildNumber],
+    ),
+    query(
+      `SELECT * FROM ai_analyses WHERE job_name = $1 AND build_number = $2`,
+      [jobName, buildNumber],
+    ),
+    query(
+      `SELECT actor, action, created_at FROM activity_events
+       WHERE job_name = $1 AND build_number = $2
+       ORDER BY created_at DESC LIMIT 20`,
+      [jobName, buildNumber],
+    ),
+    query(
+      `SELECT COUNT(*)::int AS count FROM findings WHERE job_name = $1 AND build_number = $2`,
+      [jobName, buildNumber],
+    ),
+  ]);
+
+  const mappedFindings = findings.rows.map(mapFinding);
+  const severityCounts = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const item of mappedFindings) {
+    if (severityCounts[item.severity] !== undefined) severityCounts[item.severity] += 1;
+  }
+
+  return {
+    build: mapBuild(build, count.rows[0]?.count || 0),
+    findings: mappedFindings,
+    stages: stages.rows.map((stage) => ({
+      name: stage.stage_name,
+      status: stage.status,
+      duration: formatDuration(stage.duration_seconds),
+      durationSeconds: Number(stage.duration_seconds || 0),
+      details: stage.details || '',
+      startedAt: stage.started_at,
+      finishedAt: stage.finished_at,
+    })),
+    severityCounts,
+    aiAnalysis: ai.rows[0]
+      ? {
+          verdict: ai.rows[0].verdict,
+          confidence: ai.rows[0].confidence,
+          narrative: ai.rows[0].narrative,
+          priorities: ai.rows[0].priorities || [],
+          model: ai.rows[0].model,
+          createdAt: ai.rows[0].created_at,
+        }
+      : null,
+    activity: activity.rows.map((event) => ({
+      actor: event.actor,
+      action: event.action,
+      time: relativeTime(event.created_at),
+    })),
+  };
+}
+
+export async function listFindings(filters = {}) {
+  const {
+    severity,
+    status,
+    source,
+    q,
+    jobName,
+    buildNumber,
+    limit = 100,
+  } = filters;
+
+  const clauses = [];
+  const params = [];
+
+  if (jobName) {
+    params.push(jobName);
+    clauses.push(`job_name = $${params.length}`);
+  }
+  if (buildNumber) {
+    params.push(Number(buildNumber));
+    clauses.push(`build_number = $${params.length}`);
+  }
+  if (severity && severity !== 'all') {
+    params.push(severity);
+    clauses.push(`severity = $${params.length}`);
+  }
+  if (status && status !== 'all') {
+    params.push(status);
+    clauses.push(`status = $${params.length}`);
+  }
+  if (source && source !== 'all') {
+    params.push(source);
+    clauses.push(`source = $${params.length}`);
+  }
+  if (q) {
+    params.push(`%${q}%`);
+    clauses.push(`(title ILIKE $${params.length} OR finding_key ILIKE $${params.length} OR asset ILIKE $${params.length})`);
+  }
+
+  params.push(Math.min(Number(limit) || 100, 500));
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await query(
     `SELECT * FROM findings
-     WHERE job_name = $1 AND build_number = $2
+     ${where}
      ORDER BY CASE severity
        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-       created_at DESC`,
-    [jobName, buildNumber],
+       created_at DESC
+     LIMIT $${params.length}`,
+    params,
   );
-  return result.rows;
+  return result.rows.map(mapFinding);
 }
 
-async function getAllOpenFindingCounts() {
-  const result = await query(
-    `SELECT severity, COUNT(*)::int AS count
-     FROM findings f
-     INNER JOIN (
-       SELECT job_name, MAX(build_number) AS build_number
-       FROM security_builds
-       GROUP BY job_name
-     ) latest ON latest.job_name = f.job_name AND latest.build_number = f.build_number
-     GROUP BY severity`,
-  );
-  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
-  for (const row of result.rows) {
-    counts[row.severity] = row.count;
+export async function getFindingById(id) {
+  const result = await query(`SELECT * FROM findings WHERE id = $1`, [Number(id)]);
+  return result.rows[0] ? mapFinding(result.rows[0]) : null;
+}
+
+export async function updateFindingStatus(id, status) {
+  const allowed = new Set(['open', 'triage', 'in-progress', 'accepted', 'resolved', 'false-positive']);
+  if (!allowed.has(status)) {
+    throw new Error(`Invalid status: ${status}`);
   }
-  return counts;
-}
-
-async function getTrend() {
   const result = await query(
-    `SELECT
-       to_char(date_trunc('day', b.finished_at), 'Dy') AS day,
-       date_trunc('day', b.finished_at) AS day_date,
-       COUNT(*) FILTER (WHERE f.severity = 'critical')::int AS critical,
-       COUNT(*) FILTER (WHERE f.severity = 'high')::int AS high,
-       COUNT(*) FILTER (WHERE f.severity = 'medium')::int AS medium
-     FROM security_builds b
-     LEFT JOIN findings f
-       ON f.job_name = b.job_name AND f.build_number = b.build_number
-     WHERE b.finished_at >= NOW() - INTERVAL '7 days'
-     GROUP BY day_date
-     ORDER BY day_date`,
+    `UPDATE findings SET status = $1 WHERE id = $2 RETURNING *`,
+    [status, Number(id)],
   );
-  return result.rows.map((row) => ({
-    day: row.day?.trim() || '—',
-    critical: row.critical,
-    high: row.high,
-    medium: row.medium,
-  }));
+  const finding = result.rows[0] ? mapFinding(result.rows[0]) : null;
+  if (finding) {
+    await query(
+      `INSERT INTO activity_events (job_name, build_number, actor, action)
+       VALUES ($1, $2, $3, $4)`,
+      [finding.jobName, finding.buildNumber, 'Dashboard', `Set ${finding.findingKey} to ${status}`],
+    );
+  }
+  return finding;
 }
 
-async function getStages(jobName, buildNumber) {
+export async function listActivity(limit = 30) {
   const result = await query(
-    `SELECT stage_name, duration_seconds, status
-     FROM pipeline_stages
-     WHERE job_name = $1 AND build_number = $2
-     ORDER BY finished_at NULLS LAST, stage_name`,
-    [jobName, buildNumber],
-  );
-  return result.rows;
-}
-
-async function getAiAnalysis(jobName, buildNumber) {
-  const result = await query(
-    `SELECT * FROM ai_analyses
-     WHERE job_name = $1 AND build_number = $2`,
-    [jobName, buildNumber],
-  );
-  return result.rows[0] || null;
-}
-
-async function getActivity(limit = 8) {
-  const result = await query(
-    `SELECT actor, action, created_at
+    `SELECT actor, action, created_at, job_name, build_number
      FROM activity_events
      ORDER BY created_at DESC
      LIMIT $1`,
-    [limit],
+    [Math.min(Number(limit) || 30, 100)],
   );
-  return result.rows;
+  return result.rows.map((event) => ({
+    actor: event.actor,
+    action: event.action,
+    time: relativeTime(event.created_at),
+    jobName: event.job_name,
+    buildNumber: event.build_number,
+  }));
 }
 
-async function getControlsFromFindings(findings) {
+function controlsFromFindings(findings) {
   const sources = {
     SAST: { tool: 'SonarQube', names: ['SonarQube', 'SAST'] },
     SCA: { tool: 'OWASP Dependency-Check', names: ['OWASP'] },
@@ -153,133 +365,113 @@ async function getControlsFromFindings(findings) {
     const criticalOrHigh = related.some((f) => f.severity === 'critical' || f.severity === 'high');
     const status = related.length === 0 ? 'passing' : criticalOrHigh ? 'failing' : 'warning';
     const coverage = related.length === 0 ? 100 : Math.max(40, 100 - related.length * 4);
-    return { name, tool: meta.tool, status, coverage };
+    return { name, tool: meta.tool, status, coverage, findings: related.length };
   });
 }
 
-function blockedBuilds(builds) {
-  return builds.filter((b) => ['failed', 'unstable'].includes(String(b.status).toLowerCase())).length;
-}
-
-export async function buildDashboardPayload() {
-  const latest = await getLatestBuild();
-  if (!latest) {
-    return null;
+export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
+  let selected;
+  if (jobName && buildNumber) {
+    const result = await query(
+      `SELECT * FROM security_builds WHERE job_name = $1 AND build_number = $2`,
+      [jobName, Number(buildNumber)],
+    );
+    selected = result.rows[0] || null;
+  } else {
+    const result = await query(
+      `SELECT * FROM security_builds
+       ORDER BY finished_at DESC NULLS LAST, build_number DESC
+       LIMIT 1`,
+    );
+    selected = result.rows[0] || null;
   }
 
-  const [builds, findings, counts, trend, stages, ai, activity] = await Promise.all([
-    getBuilds(8),
-    getFindings(latest.job_name, latest.build_number),
-    getAllOpenFindingCounts(),
-    getTrend(),
-    getStages(latest.job_name, latest.build_number),
-    getAiAnalysis(latest.job_name, latest.build_number),
-    getActivity(8),
-  ]);
+  if (!selected) return emptyDashboardPayload();
 
+  const detail = await getBuildDetail(selected.job_name, selected.build_number);
+  const builds = await listBuilds({ limit: 25 });
+  const activity = await listActivity(12);
+
+  const counts = detail.severityCounts;
   const totalFindings = counts.critical + counts.high + counts.medium + counts.low;
-  const controls = await getControlsFromFindings(findings);
+  const controls = controlsFromFindings(detail.findings);
   const coverage = Math.round(
     controls.reduce((sum, item) => sum + item.coverage, 0) / Math.max(controls.length, 1),
   );
 
-  const severity = [
-    { name: 'Critical', value: counts.critical, color: severityColors.Critical },
-    { name: 'High', value: counts.high, color: severityColors.High },
-    { name: 'Medium', value: counts.medium, color: severityColors.Medium },
-    { name: 'Low', value: counts.low, color: severityColors.Low },
-  ];
+  const previous = builds.find(
+    (b) => b.jobName === selected.job_name && b.id < selected.build_number,
+  );
+  const riskDelta = previous ? selected.risk_score - previous.risk : 0;
 
-  const previous = builds[1];
-  const riskDelta = previous ? latest.risk_score - previous.risk_score : 0;
+  const trendResult = await query(
+    `SELECT
+       to_char(date_trunc('day', b.finished_at), 'Dy') AS day,
+       date_trunc('day', b.finished_at) AS day_date,
+       COUNT(*) FILTER (WHERE f.severity = 'critical')::int AS critical,
+       COUNT(*) FILTER (WHERE f.severity = 'high')::int AS high,
+       COUNT(*) FILTER (WHERE f.severity = 'medium')::int AS medium
+     FROM security_builds b
+     LEFT JOIN findings f
+       ON f.job_name = b.job_name AND f.build_number = b.build_number
+     WHERE b.finished_at >= NOW() - INTERVAL '7 days'
+     GROUP BY day_date
+     ORDER BY day_date`,
+  );
 
   return {
     generatedAt: new Date().toISOString(),
     organization: 'DevSecOps Lab',
     dataMode: 'postgres',
     summary: {
-      riskScore: latest.risk_score,
+      riskScore: selected.risk_score,
       riskDelta,
       totalFindings,
       critical: counts.critical,
       high: counts.high,
       medium: counts.medium,
       low: counts.low,
-      blockedBuilds: blockedBuilds(builds),
+      blockedBuilds: builds.filter((b) => ['failed', 'unstable'].includes(String(b.status).toLowerCase())).length,
       meanTimeToResolve: formatDuration(
         Math.round(
-          builds.reduce((sum, b) => sum + Number(b.duration_seconds || 0), 0) / Math.max(builds.length, 1),
+          builds.reduce((sum, b) => sum + Number(b.durationSeconds || 0), 0) / Math.max(builds.length, 1),
         ),
       ),
       coverage,
+      totalBuilds: builds.length,
     },
-    severity,
-    trend: trend.length
-      ? trend
-      : [
-          {
-            day: 'Now',
-            critical: counts.critical,
-            high: counts.high,
-            medium: counts.medium,
-          },
-        ],
-    pipelinePerformance: stages.map((stage) => ({
-      stage: stage.stage_name,
-      duration: Number(stage.duration_seconds || 0),
-      baseline: Math.max(Number(stage.duration_seconds || 0) - 5, 1),
+    severity: [
+      { name: 'Critical', value: counts.critical, color: severityColors.Critical },
+      { name: 'High', value: counts.high, color: severityColors.High },
+      { name: 'Medium', value: counts.medium, color: severityColors.Medium },
+      { name: 'Low', value: counts.low, color: severityColors.Low },
+    ],
+    trend: trendResult.rows.map((row) => ({
+      day: row.day?.trim() || '—',
+      critical: row.critical,
+      high: row.high,
+      medium: row.medium,
     })),
-    pipelines: builds.map((build) => ({
-      id: build.build_number,
-      name: build.job_name,
-      branch: build.branch || 'main',
-      commit: shortCommit(build.commit_sha),
-      status: build.status,
-      risk: build.risk_score,
-      duration: formatDuration(build.duration_seconds),
-      findings: undefined,
-      triggeredBy: build.triggered_by || 'jenkins',
-      finishedAt: relativeTime(build.finished_at),
+    pipelinePerformance: detail.stages.map((stage) => ({
+      stage: stage.name,
+      duration: stage.durationSeconds,
+      baseline: Math.max(stage.durationSeconds - 5, 1),
+      status: stage.status,
     })),
-    alerts: findings.slice(0, 8).map((finding) => ({
-      id: finding.finding_key,
-      severity: finding.severity,
-      title: finding.title,
-      source: finding.source,
-      pipeline: `${finding.job_name} #${finding.build_number}`,
-      asset: finding.asset || 'n/a',
-      status: finding.status,
-      age: relativeTime(finding.created_at),
-      confidence: finding.confidence,
-    })),
+    pipelines: builds,
+    alerts: detail.findings.filter((f) => f.status !== 'resolved' && f.status !== 'false-positive').slice(0, 12),
     controls,
-    aiAnalysis: ai
-      ? {
-          verdict: ai.verdict,
-          confidence: ai.confidence,
-          narrative: ai.narrative,
-          priorities: ai.priorities || [],
-        }
-      : {
-          verdict: 'Waiting for AI analysis of the latest ingested build',
-          confidence: 0,
-          narrative:
-            'Findings are stored in PostgreSQL. The AI analyzer will write a verdict after the publish stage triggers analysis.',
-          priorities: [],
-        },
-    activity: activity.map((event) => ({
-      actor: event.actor,
-      action: event.action,
-      time: relativeTime(event.created_at),
-    })),
+    aiAnalysis: detail.aiAnalysis,
+    activity,
     selectedBuild: {
-      jobName: latest.job_name,
-      buildNumber: latest.build_number,
-      branch: latest.branch || 'main',
-      commit: shortCommit(latest.commit_sha),
-      status: latest.status,
-      finishedAt: relativeTime(latest.finished_at),
-      duration: formatDuration(latest.duration_seconds),
+      jobName: selected.job_name,
+      buildNumber: selected.build_number,
+      branch: selected.branch || 'main',
+      commit: shortCommit(selected.commit_sha),
+      status: selected.status,
+      finishedAt: relativeTime(selected.finished_at),
+      duration: formatDuration(selected.duration_seconds),
+      risk: selected.risk_score,
     },
   };
 }

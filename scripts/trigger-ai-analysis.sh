@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Trigger DeepSeek AI analysis for a stored build (called from Jenkins).
+# Trigger Hugging Face AI analysis for a stored build (called from Jenkins).
 set -euo pipefail
 
 AI_URL="${AI_ANALYZER_URL:-http://127.0.0.1:4300}"

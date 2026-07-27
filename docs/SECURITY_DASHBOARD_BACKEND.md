@@ -1,112 +1,59 @@
-# Security data plane (PostgreSQL + ingest + DeepSeek)
-
-This connects the Jenkins DevSecOps pipeline to the SentinelOps dashboard.
+# Security data plane (PostgreSQL + ingest + Hugging Face)
 
 ```
-Jenkins scanners (Gitleaks / Trivy / OWASP)
+Jenkins scanners → reports/
         │
         ▼
-scripts/publish-to-dashboard.sh   ← new pipeline stage
+services/ingest-bridge :4200  →  PostgreSQL (findings, builds, stages)
         │
-        ▼
-services/ingest-bridge :4200      ← parses reports, stores builds
-        │
-        ├──► PostgreSQL (existing jenkins DB)
-        │
-        └──► services/ai-analyzer :4300  ← DeepSeek analysis
+        └──► services/ai-analyzer :4300  ← Hugging Face analysis
                     │
                     ▼
-         security-dashboard :4100 / :5173
+        security-dashboard :4100 / :5173
 ```
 
-## 1. Prepare PostgreSQL
+## 1. Environment
 
-Use the existing Jenkins database (`jenkins`) or start a local one:
+Copy `.env.example` values into your shell or Jenkins credentials. Never commit real API keys.
+
+## 2. Start services
 
 ```bash
-cp .env.example .env
-# edit JENKINS_DB_PASSWORD and DEEPSEEK_API_KEY
-
-docker compose up -d postgres
-# or against your existing DB:
-psql -h 127.0.0.1 -U jenkins -d jenkins -f db/migrations/001_security_dashboard.sql
+# edit JENKINS_DB_PASSWORD and HUGGINGFACE_API_KEY
+docker compose up -d
+# or
+scripts/ensure-security-services.sh
 ```
 
-## 2. Start backend services
+Manual:
 
 ```bash
-# Terminal A — ingest bridge
-cd services/ingest-bridge
-npm install
-npm run dev
+# Terminal A — ingest
+cd services/ingest-bridge && npm start
 
-# Terminal B — DeepSeek AI analyzer
-cd services/ai-analyzer
-npm install
-# set DEEPSEEK_API_KEY first
-npm run dev
+# Terminal B — Hugging Face AI analyzer
+cd services/ai-analyzer && npm start
 
 # Terminal C — dashboard
-cd security-dashboard
-npm install
-npm run dev
+cd security-dashboard && npm run dev
 ```
 
-Or everything with Docker:
+## 3. Hugging Face API key
 
-```bash
-docker compose up --build
-```
+1. Create a token at https://huggingface.co/settings/tokens  
+2. Set `HUGGINGFACE_API_KEY` in Jenkins credential ID `huggingface-api-key`  
+3. Model default: `mistralai/Mistral-7B-Instruct-v0.3`  
+4. API: `https://router.huggingface.co/v1/chat/completions`
 
-- Dashboard API: http://localhost:4100  
-- Ingest: http://localhost:4200/health  
-- AI: http://localhost:4300/health  
-- Vite UI: http://localhost:5173  
+## 4. Tables
 
-## 3. DeepSeek API key
+- `security_builds` / `findings` / `pipeline_stages` — ingest output  
+- `ai_analyses` — Hugging Face verdict for that build  
+- `activity_events` — timeline  
 
-1. Create a key at https://platform.deepseek.com  
-2. Set `DEEPSEEK_API_KEY` in `.env` / Jenkins / shell  
-3. Model default: `deepseek-chat`
+## 5. Dashboard mapping
 
-Without a key, the AI service still stores a deterministic local fallback analysis so the dashboard keeps working.
-
-## 4. Jenkins configuration
-
-New stage: **Publish to Security Dashboard** (after Deploy).
-
-Set on the Jenkins agent / job:
-
-| Variable | Example |
-|----------|---------|
-| `INGEST_URL` | `http://<dashboard-host>:4200/ingest/build` |
-| `INGEST_TOKEN` | optional shared secret |
-| `JENKINS_DB_*` | already used by `log-to-postgresql.sh` |
-
-Each build upserts:
-
-- `security_builds` — one row per build with risk score + duration  
-- `pipeline_stages` — per-stage status/duration  
-- `findings` — normalized Gitleaks / Trivy / OWASP issues  
-- `ai_analyses` — DeepSeek verdict for that build  
-
-## 5. Manual publish (without waiting for a full pipeline)
-
-```bash
-export JOB_NAME=Devops-project
-export BUILD_NUMBER=99
-export STATUS=UNSTABLE
-export COMMIT_SHA=$(git rev-parse HEAD)
-export REPORTS_DIR=reports
-bash scripts/publish-to-dashboard.sh
-```
-
-## 6. What the dashboard shows
-
-| Metric | Source |
-|--------|--------|
-| Risk score / severities | Computed from ingested findings |
-| Pipeline table | Every `security_builds` row (each Jenkins build) |
-| Build duration | `DURATION_SECONDS` from publish + stage timings |
-| Priority alerts | Latest build findings |
-| AI panel / chat | `ai_analyses` + DeepSeek `/chat` |
+| UI | Source |
+|----|--------|
+| Overview metrics | `/api/dashboard` |
+| AI panel / chat | `ai_analyses` + analyzer `/chat` |

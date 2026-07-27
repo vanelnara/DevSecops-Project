@@ -75,8 +75,13 @@ npm_prepare() {
   echo "Installing dependencies in ${dir}"
   (
     cd "${dir}"
+    # Prefer a clean lockfile install, but fall back when package.json and
+    # package-lock.json drift (common after adding deps like pg).
     if [ -f package-lock.json ]; then
-      npm ci --no-audit --no-fund
+      if ! npm ci --no-audit --no-fund; then
+        echo "WARN: npm ci failed in ${dir}; falling back to npm install"
+        npm install --no-audit --no-fund
+      fi
     else
       npm install --no-audit --no-fund
     fi
@@ -106,8 +111,10 @@ start_bg() {
     export INGEST_PORT AI_PORT DASHBOARD_API_PORT
     export AI_ANALYZER_URL="${AI_ANALYZER_URL:-http://127.0.0.1:${AI_PORT}}"
     export INGEST_URL="${INGEST_URL:-http://127.0.0.1:${INGEST_PORT}/ingest/build}"
-    export DEEPSEEK_API_KEY="${DEEPSEEK_API_KEY:-}"
-    export DEEPSEEK_MODEL="${DEEPSEEK_MODEL:-deepseek-chat}"
+    export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
+    export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"
+    export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
+    export HUGGINGFACE_API_URL="${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}"
     export DASHBOARD_MOCK_FALLBACK="${DASHBOARD_MOCK_FALLBACK:-true}"
     # nohup so process survives after Jenkins step ends
     nohup bash -lc "${cmd}" >>"${log_file}" 2>&1 &

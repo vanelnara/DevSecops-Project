@@ -9,6 +9,19 @@
       content="DevSecOps pipeline security intelligence dashboard"
     />
     <title>SentinelOps Security Intelligence</title>
+    <script>
+      (function () {
+        try {
+          var pref = localStorage.getItem('sentinelops-theme') || 'system';
+          var systemLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+          var theme = pref === 'system' ? (systemLight ? 'light' : 'dark') : pref;
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.style.colorScheme = theme;
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

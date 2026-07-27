@@ -1,5 +1,48 @@
 import express from 'express';
 import pg from 'pg';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  AGENT_NAME,
+  NO_PIPELINE_GUIDANCE,
+  OFF_TOPIC_REFUSAL,
+  agentPublicConfig,
+  buildAnalyzeSystemPrompt,
+  buildChatSystemPrompt,
+  looksInScope,
+  looksPipelineRequired,
+} from './agentConfig.js';
+import { callChatCompletion, providerStatus } from './providers.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function loadEnvFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return;
+    const text = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq <= 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"'))
+        || (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!(key in process.env)) process.env[key] = value;
+    }
+  } catch (error) {
+    console.warn(`Unable to load env file ${filePath}: ${error.message}`);
+  }
+}
+
+loadEnvFile(path.resolve(__dirname, '../.env'));
+loadEnvFile(path.resolve(__dirname, '../../../.env'));
 
 const {
   JENKINS_DB_HOST = '127.0.0.1',
@@ -8,9 +51,6 @@ const {
   JENKINS_DB_USER = 'jenkins',
   JENKINS_DB_PASSWORD = '',
   DATABASE_URL,
-  DEEPSEEK_API_KEY = '',
-  DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions',
-  DEEPSEEK_MODEL = 'deepseek-chat',
   AI_PORT = '4300',
 } = process.env;
 
@@ -28,6 +68,30 @@ const pool = new pg.Pool(
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
+
+async function dbReachable() {
+  try {
+    await pool.query('SELECT 1');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveLatestBuild(jobName) {
+  try {
+    const latest = await pool.query(
+      `SELECT job_name, build_number FROM security_builds
+       WHERE ($1::text IS NULL OR job_name = $1)
+       ORDER BY finished_at DESC NULLS LAST, build_number DESC
+       LIMIT 1`,
+      [jobName || null],
+    );
+    return latest.rows[0] || null;
+  } catch {
+    return null;
+  }
+}
 
 async function loadBuildContext(jobName, buildNumber) {
   const build = await pool.query(
@@ -80,7 +144,7 @@ function fallbackAnalysis(context) {
       ? `Top issue: ${top.title} (${top.source} / ${top.severity}). Review scanner reports and remediations before promoting the next release.`
       : 'No scanner findings were ingested for this build. Confirm report upload from the Jenkins publish stage.',
     priorities: context.findings.slice(0, 3).map((finding, index) => ({
-      priority: `P${index}`,
+      priority: `P${index + 1}`,
       title: finding.title,
       impact: `${finding.severity} finding from ${finding.source}`,
       effort: finding.severity === 'critical' ? '30–60 min' : '20–45 min',
@@ -100,63 +164,43 @@ function extractJsonObject(text) {
   }
 }
 
-async function callDeepSeek(systemPrompt, userPrompt) {
-  if (!DEEPSEEK_API_KEY) {
-    throw new Error('DEEPSEEK_API_KEY is not configured');
-  }
-
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: DEEPSEEK_MODEL,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`DeepSeek API error ${response.status}: ${body}`);
-  }
-
-  const payload = await response.json();
-  return payload.choices?.[0]?.message?.content || '';
+async function callModel(systemPrompt, userPrompt, messages = []) {
+  const result = await callChatCompletion({ systemPrompt, userPrompt, messages });
+  return result;
 }
 
 async function analyzeBuild(jobName, buildNumber) {
   const context = await loadBuildContext(jobName, buildNumber);
+  if (!context.build) {
+    const error = new Error(`No ingested build found for ${jobName} #${buildNumber}. Push/run the Jenkins pipeline first.`);
+    error.code = 'NO_PIPELINE';
+    throw error;
+  }
+
   let analysis = fallbackAnalysis(context);
 
   try {
-    const systemPrompt =
-      'You are a DevSecOps security analyst. Return ONLY valid JSON with keys: verdict, confidence, narrative, priorities. priorities is an array of {priority,title,impact,effort}. Be concise and actionable.';
     const userPrompt = JSON.stringify({
       build: context.build,
       findings: context.findings,
       stages: context.stages,
       logExcerpt: String(context.logExcerpt || '').slice(0, 4000),
     });
-    const content = await callDeepSeek(systemPrompt, userPrompt);
-    const parsed = extractJsonObject(content);
+    const result = await callModel(buildAnalyzeSystemPrompt(), userPrompt);
+    const parsed = extractJsonObject(result.content);
     if (parsed?.verdict) {
       analysis = {
         verdict: parsed.verdict,
         confidence: Number(parsed.confidence || 85),
         narrative: parsed.narrative || analysis.narrative,
         priorities: Array.isArray(parsed.priorities) ? parsed.priorities : analysis.priorities,
-        model: DEEPSEEK_MODEL,
+        model: result.model,
+        provider: result.provider,
         raw: parsed,
       };
     }
   } catch (error) {
-    console.warn(`DeepSeek analysis fallback: ${error.message}`);
+    console.warn(`AI analysis fallback: ${error.message}`);
   }
 
   await pool.query(
@@ -185,17 +229,117 @@ async function analyzeBuild(jobName, buildNumber) {
   await pool.query(
     `INSERT INTO activity_events (job_name, build_number, actor, action)
      VALUES ($1, $2, $3, $4)`,
-    [jobName, buildNumber, 'AI Analyzer', `Generated remediation plan for build #${buildNumber}`],
+    [jobName, buildNumber, AGENT_NAME, `Generated remediation plan for build #${buildNumber}`],
   );
 
   return analysis;
 }
 
-app.get('/health', (_req, res) => {
+function localChatFallback({ question, hasPipeline, context, inScope, needsPipeline, errorMessage }) {
+  if (!inScope) {
+    return {
+      answer: OFF_TOPIC_REFUSAL,
+      inScope: false,
+      needsPipeline: false,
+    };
+  }
+
+  if (needsPipeline && !hasPipeline) {
+    return {
+      answer: NO_PIPELINE_GUIDANCE,
+      inScope: true,
+      needsPipeline: true,
+    };
+  }
+
+  if (hasPipeline) {
+    const critical = context.findings.filter((f) => f.severity === 'critical');
+    if (critical.length) {
+      return {
+        answer: `There are ${critical.length} critical findings on build #${context.build.build_number}. Start with ${critical[0].finding_key}: ${critical[0].title}.`,
+        inScope: true,
+        needsPipeline: false,
+        citations: critical.slice(0, 4).map((f) => f.finding_key),
+      };
+    }
+    return {
+      answer: `Build #${context.build?.build_number} is loaded with ${context.findings.length} findings. Ask about a specific finding key, risk prioritization, or remediation steps.`,
+      inScope: true,
+      needsPipeline: false,
+      citations: context.findings.slice(0, 4).map((f) => f.finding_key),
+    };
+  }
+
+  const q = String(question || '').toLowerCase();
+  let tip =
+    'I am online in local mode. Configure HUGGINGFACE_API_KEY for live model answers.';
+
+  if (q.includes('networkpolicy') || (q.includes('kubernetes') && q.includes('network'))) {
+    tip = [
+      'Kubernetes NetworkPolicy controls pod-to-pod traffic using label selectors.',
+      'Start with a default-deny Ingress policy in the namespace, then allow only required ports between frontend/backend/database labels.',
+      'Validate with kubectl and a temporary debug pod before enforcing in production.',
+    ].join(' ');
+  } else if (q.includes('jenkins') || q.includes('pipeline') || q.includes('ci/cd') || q.includes('cicd')) {
+    tip = [
+      'Harden Jenkins by storing secrets in Credentials (not Groovy plaintext), using least-privilege agents, and failing the pipeline on critical scanner findings.',
+      'For this dashboard, run Store Security Findings then AI Security Analysis so builds appear automatically.',
+    ].join(' ');
+  } else if (q.includes('trivy') || q.includes('container') || q.includes('image')) {
+    tip = [
+      'Scan images with Trivy in CI, block critical/high CVEs, rebuild from minimal base images, and sign with Cosign before deploy.',
+      'Publish the Trivy report to the ingest bridge so the dashboard can track findings.',
+    ].join(' ');
+  } else if (q.includes('iam') || q.includes('cloud') || q.includes('aws') || q.includes('azure') || q.includes('gcp')) {
+    tip = [
+      'Apply least privilege: short-lived roles, no long-lived access keys in CI, scoped policies per service account, and MFA for humans.',
+      'Prefer OIDC federation from Jenkins/GitHub Actions into the cloud provider.',
+    ].join(' ');
+  } else if (q.includes('devsecops') || q.includes('devops') || q.includes('security')) {
+    tip = [
+      'DevSecOps shifts security left into CI/CD: SAST, SCA, secrets scanning, container scanning, signing, and policy gates before deploy.',
+      'Use the dashboard copilot for build-specific remediation once Jenkins publishes scanner output.',
+    ].join(' ');
+  }
+
+  const balanceNote = errorMessage && /huggingface|401|403|402|timeout|abort/i.test(errorMessage)
+    ? `\n\n(Live Hugging Face model unavailable: ${errorMessage})`
+    : errorMessage
+      ? `\n\n(Live model unavailable: ${errorMessage})`
+      : '';
+
+  return {
+    answer: `${tip}\n\nNo pipeline is ingested yet. Run Jenkins through Store Security Findings when you want build-specific analysis and remediation.${balanceNote}`,
+    inScope: true,
+    needsPipeline: false,
+  };
+}
+
+app.get('/health', async (_req, res) => {
+  const database = await dbReachable();
+  const llm = providerStatus();
   res.json({
     status: 'ok',
     service: 'security-ai-analyzer',
-    deepseekConfigured: Boolean(DEEPSEEK_API_KEY),
+    agent: agentPublicConfig(),
+    ...llm,
+    database,
+  });
+});
+
+app.get('/agent', async (_req, res) => {
+  const database = await dbReachable();
+  const latest = database ? await resolveLatestBuild(null) : null;
+  const llm = providerStatus();
+  res.json({
+    online: true,
+    agent: agentPublicConfig(),
+    ...llm,
+    database,
+    pipelineAvailable: Boolean(latest),
+    latestBuild: latest
+      ? { jobName: latest.job_name, buildNumber: latest.build_number }
+      : null,
   });
 });
 
@@ -205,10 +349,15 @@ app.post('/analyze', async (req, res) => {
     const buildNumber = Number(req.body?.buildNumber);
     if (!buildNumber) return res.status(400).json({ error: 'buildNumber is required' });
     const analysis = await analyzeBuild(jobName, buildNumber);
-    return res.json({ ok: true, analysis });
+    return res.json({ ok: true, analysis, agent: agentPublicConfig().name });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: error.message || 'Analyze failed' });
+    const status = error.code === 'NO_PIPELINE' ? 404 : 500;
+    return res.status(status).json({
+      error: error.message || 'Analyze failed',
+      needsPipeline: error.code === 'NO_PIPELINE',
+      guidance: error.code === 'NO_PIPELINE' ? NO_PIPELINE_GUIDANCE : undefined,
+    });
   }
 });
 
@@ -217,45 +366,130 @@ app.post('/chat', async (req, res) => {
     const question = String(req.body?.question || '').trim();
     if (!question) return res.status(400).json({ error: 'A question is required.' });
 
-    const jobName = String(req.body?.jobName || 'Devops-project');
-    let buildNumber = Number(req.body?.buildNumber);
+    const requestedJob = req.body?.jobName ? String(req.body.jobName) : '';
+    let buildNumber = Number(req.body?.buildNumber) || null;
+    let jobName = requestedJob || null;
+
     if (!buildNumber) {
-      const latest = await pool.query(
-        `SELECT build_number FROM security_builds
-         WHERE job_name = $1
-         ORDER BY build_number DESC LIMIT 1`,
-        [jobName],
-      );
-      buildNumber = latest.rows[0]?.build_number;
+      const latest = await resolveLatestBuild(jobName);
+      if (latest) {
+        jobName = latest.job_name;
+        buildNumber = latest.build_number;
+      }
     }
 
-    const context = buildNumber ? await loadBuildContext(jobName, buildNumber) : { findings: [], stages: [], build: null, logExcerpt: '' };
-    let answer =
-      'No DeepSeek key configured. Based on stored findings, remediate critical secrets and high CVEs first, then rerun the pipeline.';
+    jobName = jobName || 'Devops-project';
+    const inScope = looksInScope(question);
+    const wantsPipeline = looksPipelineRequired(question);
+
+    let context = { findings: [], stages: [], build: null, logExcerpt: '' };
+    if (buildNumber) {
+      try {
+        context = await loadBuildContext(jobName, buildNumber);
+      } catch (dbError) {
+        console.warn(`Build context unavailable: ${dbError.message}`);
+      }
+    }
+
+    const hasPipeline = Boolean(context.build);
+    const needsPipeline = wantsPipeline && !hasPipeline;
+
+    // Fast local gate for clear out-of-scope + pipeline-required-without-data.
+    if (!inScope || needsPipeline) {
+      const local = localChatFallback({
+        question,
+        hasPipeline,
+        context,
+        inScope,
+        needsPipeline,
+      });
+      return res.json({
+        answer: local.answer,
+        inScope: local.inScope,
+        needsPipeline: local.needsPipeline,
+        pipelineAvailable: hasPipeline,
+        jobName: hasPipeline ? jobName : null,
+        buildNumber: hasPipeline ? buildNumber : null,
+        model: 'policy-guard',
+        confidence: 100,
+        citations: local.citations || [],
+        suggestions: hasPipeline
+          ? ['What should I fix first?', 'Summarize this build risk', 'Draft a remediation plan']
+          : [
+              'How do I harden a Jenkins pipeline?',
+              'Explain Kubernetes NetworkPolicy basics',
+              'What should I publish for dashboard ingest?',
+            ],
+        agent: AGENT_NAME,
+        generatedAt: new Date().toISOString(),
+      });
+    }
+
+    const llm = providerStatus();
+    let answer;
+    let model = llm.configured ? llm.model : 'local-fallback';
+    let confidence = llm.configured ? 90 : 70;
+    let citations = context.findings.slice(0, 4).map((f) => f.finding_key);
+    let provider = llm.provider;
 
     try {
-      const systemPrompt =
-        'You are a concise DevSecOps assistant. Answer using the provided build findings and stage data. Cite finding IDs when useful.';
-      const userPrompt = `Question: ${question}\n\nContext JSON:\n${JSON.stringify({
-        build: context.build,
-        findings: context.findings.slice(0, 20),
-        stages: context.stages,
-      })}`;
-      answer = await callDeepSeek(systemPrompt, userPrompt);
+      const systemPrompt = buildChatSystemPrompt({
+        hasPipeline,
+        jobName,
+        buildNumber,
+      });
+      const userPrompt = [
+        `Question: ${question}`,
+        '',
+        `Pipeline available: ${hasPipeline}`,
+        hasPipeline
+          ? `Context JSON:\n${JSON.stringify({
+              build: context.build,
+              findings: context.findings.slice(0, 20),
+              stages: context.stages,
+            })}`
+          : 'Context JSON: null (no ingested pipeline build). Answer general in-scope IT questions, or ask the user to push/run the pipeline for build-specific analysis.',
+      ].join('\n');
+
+      const result = await callModel(systemPrompt, userPrompt, req.body?.messages);
+      answer = result.content;
+      model = result.model;
+      provider = result.provider;
     } catch (error) {
-      const critical = context.findings.filter((f) => f.severity === 'critical');
-      if (critical.length) {
-        answer = `There are ${critical.length} critical findings. Start with ${critical[0].finding_key}: ${critical[0].title}.`;
-      } else {
-        answer = `Unable to reach DeepSeek (${error.message}). Review the latest stored findings in the dashboard and remediate high-severity items first.`;
-      }
+      const local = localChatFallback({
+        question,
+        hasPipeline,
+        context,
+        inScope: true,
+        needsPipeline: false,
+        errorMessage: error.message,
+      });
+      answer = local.answer;
+      model = 'local-fallback';
+      provider = 'local';
+      confidence = 65;
+      citations = local.citations || citations;
     }
 
     return res.json({
       answer,
-      model: DEEPSEEK_API_KEY ? DEEPSEEK_MODEL : 'local-fallback',
-      confidence: DEEPSEEK_API_KEY ? 90 : 70,
-      citations: context.findings.slice(0, 4).map((f) => f.finding_key),
+      inScope: true,
+      needsPipeline: false,
+      pipelineAvailable: hasPipeline,
+      jobName: hasPipeline ? jobName : null,
+      buildNumber: hasPipeline ? buildNumber : null,
+      model,
+      provider,
+      confidence,
+      citations,
+      suggestions: hasPipeline
+        ? ['What should I fix first?', 'Summarize this build risk', 'Draft a remediation plan']
+        : [
+            'How do I secure container images with Trivy?',
+            'Best practices for Jenkins credential binding',
+            'Explain cloud IAM least privilege',
+          ],
+      agent: AGENT_NAME,
       generatedAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -265,5 +499,5 @@ app.post('/chat', async (req, res) => {
 });
 
 app.listen(Number(AI_PORT), () => {
-  console.log(`Security AI analyzer listening on http://localhost:${AI_PORT}`);
+  console.log(`${AGENT_NAME} listening on http://localhost:${AI_PORT}`);
 });
