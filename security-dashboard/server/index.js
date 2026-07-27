@@ -202,8 +202,15 @@ app.post('/api/ai/chat', async (req, res) => {
         buildNumber: req.body?.buildNumber || undefined,
         messages: Array.isArray(req.body?.messages) ? req.body.messages.slice(-8) : undefined,
       }),
+      signal: AbortSignal.timeout(Number(process.env.AI_CHAT_TIMEOUT_MS || 90000)),
     });
-    const payload = await response.json();
+    const raw = await response.text();
+    let payload = {};
+    try {
+      payload = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error(`AI analyzer returned non-JSON (${response.status}): ${raw.slice(0, 180)}`);
+    }
     if (!response.ok) {
       throw new Error(payload.error || `AI analyzer returned ${response.status}`);
     }

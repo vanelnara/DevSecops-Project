@@ -13,7 +13,7 @@ export function resolveProviderConfig(env = process.env) {
     id: 'huggingface',
     apiKey,
     apiUrl: env.HUGGINGFACE_API_URL || 'https://router.huggingface.co/v1/chat/completions',
-    model: env.HUGGINGFACE_MODEL || 'mistralai/Mistral-7B-Instruct-v0.3',
+    model: env.HUGGINGFACE_MODEL || 'Qwen/Qwen2.5-7B-Instruct:fastest',
   };
 }
 

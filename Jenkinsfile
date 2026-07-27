@@ -23,7 +23,7 @@ pipeline {
         INGEST_PORT        = "${env.INGEST_PORT ?: '4200'}"
         AI_PORT            = "${env.AI_PORT ?: '4300'}"
         AI_PROVIDER        = 'huggingface'
-        HUGGINGFACE_MODEL  = "${env.HUGGINGFACE_MODEL ?: 'mistralai/Mistral-7B-Instruct-v0.3'}"
+        HUGGINGFACE_MODEL  = "${env.HUGGINGFACE_MODEL ?: 'Qwen/Qwen2.5-7B-Instruct:fastest'}"
         // Jenkins Credentials (Secret text) — create these IDs in Jenkins UI
         JENKINS_DB_PASSWORD  = credentials('jenkins-db-password')
         HUGGINGFACE_API_KEY  = credentials('huggingface-api-key')

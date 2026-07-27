@@ -48,7 +48,7 @@ services:
       AI_PORT: 4300
       AI_PROVIDER: huggingface
       HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
-      HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}
+      HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}
       HUGGINGFACE_API_URL: ${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}
       JENKINS_DB_HOST: postgres
       JENKINS_DB_PORT: 5432

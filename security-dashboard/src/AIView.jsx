@@ -150,7 +150,20 @@ export default function AIView({
           messages: history,
         }),
       });
-      const result = await response.json();
+      const raw = await response.text();
+      let result = {};
+      try {
+        result = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(
+          raw?.trim()
+            ? `Dashboard returned invalid JSON (${response.status}). Is the API on :4100 running?`
+            : 'Dashboard API returned an empty response. Start security-dashboard server on port 4100 (npm run dev) and ensure ai-analyzer is on :4300.',
+        );
+      }
+      if (!response.ok && !result.answer) {
+        throw new Error(result.error || `Chat failed (${response.status})`);
+      }
       setMessages((current) => [
         ...current,
         {

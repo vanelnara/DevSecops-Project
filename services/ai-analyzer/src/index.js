@@ -272,7 +272,7 @@ function localChatFallback({ question, hasPipeline, context, inScope, needsPipel
 
   const q = String(question || '').toLowerCase();
   let tip =
-    'I am online in local mode. Configure HUGGINGFACE_API_KEY for live model answers.';
+    'I am online in local mode. Live Hugging Face answers will appear once the model call succeeds.';
 
   if (q.includes('networkpolicy') || (q.includes('kubernetes') && q.includes('network'))) {
     tip = [

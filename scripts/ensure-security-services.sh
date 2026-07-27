@@ -113,7 +113,7 @@ start_bg() {
     export INGEST_URL="${INGEST_URL:-http://127.0.0.1:${INGEST_PORT}/ingest/build}"
     export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
     export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"
-    export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-mistralai/Mistral-7B-Instruct-v0.3}"
+    export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
     export HUGGINGFACE_API_URL="${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}"
     export DASHBOARD_MOCK_FALLBACK="${DASHBOARD_MOCK_FALLBACK:-true}"
     # nohup so process survives after Jenkins step ends
