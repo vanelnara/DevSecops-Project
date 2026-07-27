@@ -19,23 +19,23 @@ Services keep running after the build (`nohup`). Next builds skip restart if hea
 
 ## One-time Jenkins setup
 
-### 1. DeepSeek API key (Secret text)
+### 1. Create these Secret text credentials
 
-1. Manage Jenkins → Credentials → (global) → Add Credentials  
-2. Kind: **Secret text**  
-3. Secret: your DeepSeek key  
-4. ID: **`deepseek-api-key`** (must match exactly)  
-5. Description: DeepSeek API key  
+| Credential ID | Secret value | Used as |
+|---------------|--------------|---------|
+| **`jenkins-db-password`** | Postgres password for user `jenkins` | `JENKINS_DB_PASSWORD` |
+| **`deepseek-api-key`** | DeepSeek API key | `DEEPSEEK_API_KEY` |
 
-### 2. Database password (already used by pipeline logging)
+Jenkins UI: **Manage Jenkins → Credentials → (global) → Add Credentials → Secret text**
 
-Keep using the same env var your `log-to-postgresql.sh` stage already uses:
+The Jenkinsfile binds them with:
 
-| Name | Value |
-|------|--------|
-| `JENKINS_DB_PASSWORD` | Postgres password for user `jenkins` |
+```groovy
+JENKINS_DB_PASSWORD = credentials('jenkins-db-password')
+DEEPSEEK_API_KEY    = credentials('deepseek-api-key')
+```
 
-Also ensure (if not already set):
+### 2. Optional non-secret env vars
 
 | Name | Example |
 |------|---------|

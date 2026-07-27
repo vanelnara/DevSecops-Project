@@ -22,7 +22,9 @@ pipeline {
         DASHBOARD_API_PORT = "${env.DASHBOARD_API_PORT ?: '4100'}"
         INGEST_PORT        = "${env.INGEST_PORT ?: '4200'}"
         AI_PORT            = "${env.AI_PORT ?: '4300'}"
-        DEEPSEEK_CRED_ID   = 'deepseek-api-key'
+        // Jenkins Credentials (Secret text) — create these IDs in Jenkins UI
+        JENKINS_DB_PASSWORD = credentials('jenkins-db-password')
+        DEEPSEEK_API_KEY    = credentials('deepseek-api-key')
     }
 
     options {
@@ -327,38 +329,29 @@ pipeline {
             steps {
                 script {
                     runLoggedStage('Start Services', 'Starting ingest, AI analyzer, and dashboard in background') {
-                        // DeepSeek key from Jenkins Secret text (ID: deepseek-api-key)
-                        // JENKINS_DB_PASSWORD comes from existing Jenkins env/credentials already used by log-to-postgresql.sh
-                        withCredentials([
-                            string(credentialsId: env.DEEPSEEK_CRED_ID, variable: 'DEEPSEEK_API_KEY')
-                        ]) {
-                            sh '''
-                                set -eu
-                                chmod +x scripts/ensure-security-services.sh \
-                                         scripts/publish-to-dashboard.sh \
-                                         scripts/trigger-ai-analysis.sh \
-                                         scripts/log-to-postgresql.sh
+                        // Uses pipeline credentials:
+                        //   jenkins-db-password  -> JENKINS_DB_PASSWORD
+                        //   deepseek-api-key     -> DEEPSEEK_API_KEY
+                        sh '''
+                            set -eu
+                            chmod +x scripts/ensure-security-services.sh \
+                                     scripts/publish-to-dashboard.sh \
+                                     scripts/trigger-ai-analysis.sh \
+                                     scripts/log-to-postgresql.sh
 
-                                # Fail early with a clear message if DB password is missing
-                                if [ -z "${JENKINS_DB_PASSWORD:-}" ]; then
-                                  echo "ERROR: JENKINS_DB_PASSWORD is not set in Jenkins environment."
-                                  echo "Add it under Manage Jenkins → System → Global properties (same value used by log-to-postgresql.sh)."
-                                  exit 2
-                                fi
+                            export INGEST_PORT="${INGEST_PORT}"
+                            export AI_PORT="${AI_PORT}"
+                            export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
+                            export INGEST_URL="${INGEST_URL}"
+                            export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
+                            export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
+                            export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
+                            export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
+                            export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
+                            # JENKINS_DB_PASSWORD and DEEPSEEK_API_KEY come from Jenkins credentials()
 
-                                export INGEST_PORT="${INGEST_PORT}"
-                                export AI_PORT="${AI_PORT}"
-                                export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
-                                export INGEST_URL="${INGEST_URL}"
-                                export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
-                                export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
-                                export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
-                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
-                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
-
-                                scripts/ensure-security-services.sh
-                            '''
-                        }
+                            scripts/ensure-security-services.sh
+                        '''
                         logToPostgres('Start Services', 'SUCCESS', 'Security services running in background')
                     }
                 }
