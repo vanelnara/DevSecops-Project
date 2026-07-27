@@ -1,91 +1,116 @@
+# DevSecOps security stack — one Docker network for easy troubleshooting.
+# Services talk by container name: postgres, ingest-bridge, ai-analyzer, security-dashboard
+#
+# Start full stack (includes Postgres):
+#   docker compose --profile with-db up -d --build
+#
+# Use an existing Jenkins Postgres on the host (port 5432 already taken):
+#   JENKINS_DB_HOST=host.docker.internal docker compose up -d --build
+
+name: devsecops
+
+networks:
+  devsecops-net:
+    name: devsecops-net
+    driver: bridge
+
+volumes:
+  postgres_data:
+
 services:
   postgres:
+    profiles: ["with-db"]
     image: postgres:16-alpine
     container_name: devsecops-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: jenkins
-      POSTGRES_USER: jenkins
+      POSTGRES_DB: ${JENKINS_DB_NAME:-jenkins}
+      POSTGRES_USER: ${JENKINS_DB_USER:-jenkins}
       POSTGRES_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
     ports:
-      - "5432:5432"
+      - "${JENKINS_DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations/001_security_dashboard.sql:/docker-entrypoint-initdb.d/001_security_dashboard.sql:ro
       - ./db/migrations/002_dashboard_users.sql:/docker-entrypoint-initdb.d/002_dashboard_users.sql:ro
+    networks:
+      - devsecops-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jenkins -d jenkins"]
+      test: ["CMD-SHELL", "pg_isready -U ${JENKINS_DB_USER:-jenkins} -d ${JENKINS_DB_NAME:-jenkins}"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 12
 
   ingest-bridge:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm start"
+    build:
+      context: ./services/ingest-bridge
+    image: devsecops-ingest-bridge:local
+    container_name: devsecops-ingest
+    restart: unless-stopped
     environment:
       INGEST_PORT: 4200
       INGEST_TOKEN: ${INGEST_TOKEN:-}
-      JENKINS_DB_HOST: postgres
+      JENKINS_DB_HOST: ${COMPOSE_DB_HOST:-postgres}
       JENKINS_DB_PORT: 5432
-      JENKINS_DB_NAME: jenkins
-      JENKINS_DB_USER: jenkins
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
       JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
       AI_ANALYZER_URL: http://ai-analyzer:4300
     ports:
-      - "4200:4200"
-    volumes:
-      - ./services/ingest-bridge:/app
+      - "${INGEST_PORT:-4200}:4200"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - devsecops-net
     depends_on:
-      postgres:
-        condition: service_healthy
       ai-analyzer:
         condition: service_started
 
   ai-analyzer:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm start"
+    build:
+      context: ./services/ai-analyzer
+    image: devsecops-ai-analyzer:local
+    container_name: devsecops-ai
+    restart: unless-stopped
     environment:
       AI_PORT: 4300
-      AI_PROVIDER: huggingface
+      AI_PROVIDER: ${AI_PROVIDER:-huggingface}
       HUGGINGFACE_API_KEY: ${HUGGINGFACE_API_KEY:-}
       HUGGINGFACE_MODEL: ${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}
       HUGGINGFACE_API_URL: ${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}
-      JENKINS_DB_HOST: postgres
+      JENKINS_DB_HOST: ${COMPOSE_DB_HOST:-postgres}
       JENKINS_DB_PORT: 5432
-      JENKINS_DB_NAME: jenkins
-      JENKINS_DB_USER: jenkins
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
       JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
     ports:
-      - "4300:4300"
-    volumes:
-      - ./services/ai-analyzer:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - "${AI_PORT:-4300}:4300"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - devsecops-net
 
   security-dashboard:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm run build && npm start"
+    build:
+      context: ./security-dashboard
+    image: devsecops-security-dashboard:local
+    container_name: devsecops-dashboard
+    restart: unless-stopped
     environment:
       DASHBOARD_API_PORT: 4100
-      JENKINS_DB_HOST: postgres
+      JENKINS_DB_HOST: ${COMPOSE_DB_HOST:-postgres}
       JENKINS_DB_PORT: 5432
-      JENKINS_DB_NAME: jenkins
-      JENKINS_DB_USER: jenkins
+      JENKINS_DB_NAME: ${JENKINS_DB_NAME:-jenkins}
+      JENKINS_DB_USER: ${JENKINS_DB_USER:-jenkins}
       JENKINS_DB_PASSWORD: ${JENKINS_DB_PASSWORD:-jenkins}
       AI_ANALYZER_URL: http://ai-analyzer:4300
-      DASHBOARD_MOCK_FALLBACK: "true"
+      DASHBOARD_MOCK_FALLBACK: ${DASHBOARD_MOCK_FALLBACK:-false}
     ports:
-      - "4100:4100"
-    volumes:
-      - ./security-dashboard:/app
+      - "${DASHBOARD_API_PORT:-4100}:4100"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - devsecops-net
     depends_on:
-      postgres:
-        condition: service_healthy
       ai-analyzer:
         condition: service_started
-
-volumes:
-  postgres_data:

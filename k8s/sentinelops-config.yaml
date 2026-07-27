@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentinelops-config
+  namespace: devsecops
+  labels:
+    app.kubernetes.io/part-of: sentinelops
+data:
+  # Point this at the Jenkins PostgreSQL host reachable from the cluster
+  JENKINS_DB_HOST: "192.168.10.149"

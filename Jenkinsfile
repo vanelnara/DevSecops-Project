@@ -4,6 +4,8 @@ pipeline {
     environment {
         APP_NAME           = 'devsecops-project'
         DOCKER_IMAGE       = 'sneproject/devsecops-project'
+        DASHBOARD_IMAGE    = 'sneproject/devsecops-dashboard'
+        AI_IMAGE           = 'sneproject/devsecops-ai'
         DOCKER_TAG         = "${env.BUILD_NUMBER}"
         SONAR_PROJECT_KEY  = 'devsecops-simple-shop'
         SONAR_CREDENTIALS_ID = 'sonarqube-token'
@@ -193,34 +195,54 @@ pipeline {
         stage('Docker Build & Push') {
             steps {
                 script {
-                    runLoggedStage('Docker Build', "Building ${env.DOCKER_IMAGE}:${env.DOCKER_TAG}") {
-                        dir('microservice') {
-                            withCredentials([
-                                usernamePassword(
-                                    credentialsId: 'dockerhub-credentials',
-                                    usernameVariable: 'DOCKERHUB_USERNAME',
-                                    passwordVariable: 'DOCKERHUB_PASSWORD'
-                                )
-                            ]) {
-                                sh '''
-                                    set -eu
-                                    trap 'docker logout >/dev/null 2>&1 || true' EXIT
+                    runLoggedStage('Docker Build', "Building shop + dashboard + AI images :${env.DOCKER_TAG}") {
+                        withCredentials([
+                            usernamePassword(
+                                credentialsId: 'dockerhub-credentials',
+                                usernameVariable: 'DOCKERHUB_USERNAME',
+                                passwordVariable: 'DOCKERHUB_PASSWORD'
+                            )
+                        ]) {
+                            sh '''
+                                set -eu
+                                trap 'docker logout >/dev/null 2>&1 || true' EXIT
 
-                                    printf '%s' "${DOCKERHUB_PASSWORD}" |
-                                      docker login \
-                                        --username "${DOCKERHUB_USERNAME}" \
-                                        --password-stdin
+                                printf '%s' "${DOCKERHUB_PASSWORD}" |
+                                  docker login \
+                                    --username "${DOCKERHUB_USERNAME}" \
+                                    --password-stdin
 
-                                    docker build --pull \
-                                      --tag "${DOCKER_IMAGE}:${DOCKER_TAG}" \
-                                      --tag "${DOCKER_IMAGE}:latest" \
-                                      .
-                                    docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
-                                    docker push "${DOCKER_IMAGE}:latest"
-                                '''
-                            }
+                                # 1) Simple Shop app
+                                docker build --pull \
+                                  --tag "${DOCKER_IMAGE}:${DOCKER_TAG}" \
+                                  --tag "${DOCKER_IMAGE}:latest" \
+                                  ./microservice
+                                docker push "${DOCKER_IMAGE}:${DOCKER_TAG}"
+                                docker push "${DOCKER_IMAGE}:latest"
+
+                                # 2) SentinelOps security dashboard (separate app)
+                                docker build --pull \
+                                  --tag "${DASHBOARD_IMAGE}:${DOCKER_TAG}" \
+                                  --tag "${DASHBOARD_IMAGE}:latest" \
+                                  ./security-dashboard
+                                docker push "${DASHBOARD_IMAGE}:${DOCKER_TAG}"
+                                docker push "${DASHBOARD_IMAGE}:latest"
+
+                                # 3) AI analyzer (separate app)
+                                docker build --pull \
+                                  --tag "${AI_IMAGE}:${DOCKER_TAG}" \
+                                  --tag "${AI_IMAGE}:latest" \
+                                  ./services/ai-analyzer
+                                docker push "${AI_IMAGE}:${DOCKER_TAG}"
+                                docker push "${AI_IMAGE}:latest"
+
+                                echo "Pushed:"
+                                echo "  ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                                echo "  ${DASHBOARD_IMAGE}:${DOCKER_TAG}"
+                                echo "  ${AI_IMAGE}:${DOCKER_TAG}"
+                            '''
                         }
-                        logToPostgres('Docker Build', 'SUCCESS', "Pushed ${DOCKER_IMAGE}:${DOCKER_TAG}")
+                        logToPostgres('Docker Build', 'SUCCESS', "Pushed shop+dashboard+AI :${env.DOCKER_TAG}")
                     }
                 }
             }
@@ -291,73 +313,94 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 script {
-                    runLoggedStage('K8s Deploy', 'Deploying via Argo CD to worker node') {
+                    runLoggedStage('K8s Deploy', 'Deploying shop + dashboard + AI as separate apps') {
                         withCredentials([string(credentialsId: 'argocd-admin-password', variable: 'ARGOCD_PASS')]) {
                             sh '''
                                 set -eu
                                 export KUBECONFIG=/var/lib/jenkins/.kube/config
 
                                 kubectl apply -f k8s/namespace.yaml
+                                kubectl apply -f k8s/sentinelops-config.yaml
                                 kubectl apply -f k8s/argocd-application.yaml
+                                kubectl apply -f k8s/dashboard/argocd-application.yaml
+                                kubectl apply -f k8s/ai-analyzer/argocd-application.yaml
 
                                 argocd login "${ARGOCD_SERVER}" \
                                   --username admin \
                                   --password "${ARGOCD_PASS}" \
                                   --insecure \
                                   --grpc-web
+
+                                # --- App 1: simple-shop ---
                                 argocd app set "${ARGOCD_APP_NAME}" \
                                   --kustomize-image \
                                   "${DOCKER_IMAGE}=${DOCKER_IMAGE}:${DOCKER_TAG}"
                                 argocd app sync "${ARGOCD_APP_NAME}" \
-                                  --prune \
-                                  --force \
-                                  --timeout 300
+                                  --prune --force --timeout 300 || true
 
-                                # Sync often succeeds quickly; wait can fail if Argo CD API
-                                # briefly drops (connection refused). Retry, then fall back to kubectl.
+                                # --- App 2: security-dashboard (separate) ---
+                                argocd app set devsecops-dashboard \
+                                  --kustomize-image \
+                                  "${DASHBOARD_IMAGE}=${DASHBOARD_IMAGE}:${DOCKER_TAG}"
+                                argocd app sync devsecops-dashboard \
+                                  --prune --force --timeout 300 || true
+
+                                # --- App 3: ai-analyzer (separate) ---
+                                argocd app set devsecops-ai-analyzer \
+                                  --kustomize-image \
+                                  "${AI_IMAGE}=${AI_IMAGE}:${DOCKER_TAG}"
+                                argocd app sync devsecops-ai-analyzer \
+                                  --prune --force --timeout 300 || true
+
+                                # Fallback kubectl apply if Argo apps are not ready yet
+                                kubectl apply -k k8s
+                                kubectl apply -k k8s/dashboard
+                                kubectl apply -k k8s/ai-analyzer
+                                kubectl -n "${KUBE_NAMESPACE}" set image deployment/simple-shop \
+                                  "simple-shop=${DOCKER_IMAGE}:${DOCKER_TAG}" || true
+                                kubectl -n "${KUBE_NAMESPACE}" set image deployment/security-dashboard \
+                                  "security-dashboard=${DASHBOARD_IMAGE}:${DOCKER_TAG}" || true
+                                kubectl -n "${KUBE_NAMESPACE}" set image deployment/ai-analyzer \
+                                  "ai-analyzer=${AI_IMAGE}:${DOCKER_TAG}" || true
+
                                 WAIT_OK=0
                                 for attempt in 1 2 3 4 5; do
-                                  echo "Argo CD wait attempt ${attempt}/5..."
+                                  echo "Argo CD wait attempt ${attempt}/5 (simple-shop)..."
                                   if argocd app wait "${ARGOCD_APP_NAME}" \
-                                    --sync \
-                                    --health \
-                                    --timeout 90; then
+                                    --sync --health --timeout 90; then
                                     WAIT_OK=1
                                     break
                                   fi
-                                  echo "Argo CD wait failed (attempt ${attempt}). Dumping status and retrying..."
                                   argocd app get "${ARGOCD_APP_NAME}" || true
-                                  kubectl get pods,deploy,rs -n "${KUBE_NAMESPACE}" -o wide || true
+                                  kubectl get pods,deploy -n "${KUBE_NAMESPACE}" -o wide || true
                                   sleep 10
                                   argocd login "${ARGOCD_SERVER}" \
                                     --username admin \
                                     --password "${ARGOCD_PASS}" \
-                                    --insecure \
-                                    --grpc-web || true
+                                    --insecure --grpc-web || true
                                 done
 
                                 if [ "${WAIT_OK}" != "1" ]; then
-                                  echo "WARNING: argocd app wait did not complete. Falling back to kubectl rollout status."
+                                  echo "WARNING: argocd wait incomplete — using kubectl rollout"
                                 fi
 
-                                # Clear any stuck previous ReplicaSets so the new revision can settle.
-                                kubectl rollout status deployment/simple-shop \
-                                  -n "${KUBE_NAMESPACE}" --timeout=300s \
+                                kubectl rollout status deployment/simple-shop -n "${KUBE_NAMESPACE}" --timeout=300s \
                                 || {
-                                  echo "Rollout timed out — collecting diagnostics:"
                                   kubectl describe deployment/simple-shop -n "${KUBE_NAMESPACE}" || true
                                   kubectl get pods -n "${KUBE_NAMESPACE}" -o wide || true
-                                  kubectl describe pods -n "${KUBE_NAMESPACE}" -l app=simple-shop || true
-                                  kubectl get events -n "${KUBE_NAMESPACE}" --sort-by=.lastTimestamp | tail -n 40 || true
-                                  # One recovery attempt: restart the deployment with the synced image.
                                   kubectl rollout restart deployment/simple-shop -n "${KUBE_NAMESPACE}" || true
-                                  kubectl rollout status deployment/simple-shop \
-                                    -n "${KUBE_NAMESPACE}" --timeout=180s
+                                  kubectl rollout status deployment/simple-shop -n "${KUBE_NAMESPACE}" --timeout=180s
                                 }
-                                kubectl get pods -n "${KUBE_NAMESPACE}" -o wide
+
+                                # Dashboard + AI are separate apps — wait independently (do not fail shop if one is slow)
+                                kubectl rollout status deployment/security-dashboard -n "${KUBE_NAMESPACE}" --timeout=180s || true
+                                kubectl rollout status deployment/ai-analyzer -n "${KUBE_NAMESPACE}" --timeout=180s || true
+
+                                kubectl get pods,svc -n "${KUBE_NAMESPACE}" -o wide
+                                echo "Dashboard NodePort: 30410 | AI NodePort: 30430 | Shop NodePort: 30081"
                             '''
                         }
-                        logToPostgres('K8s Deploy', 'SUCCESS', "Deployed to namespace ${KUBE_NAMESPACE}")
+                        logToPostgres('K8s Deploy', 'SUCCESS', "Deployed shop+dashboard+AI to ${env.KUBE_NAMESPACE}")
                     }
                 }
             }
@@ -381,21 +424,24 @@ pipeline {
                             export INGEST_PORT="${INGEST_PORT}"
                             export AI_PORT="${AI_PORT}"
                             export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
-                            export INGEST_URL="${INGEST_URL}"
-                            export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
+                            # Host-published ports so Jenkins steps can reach the Docker network services
+                            export INGEST_URL="${INGEST_URL:-http://127.0.0.1:${INGEST_PORT}/ingest/build}"
+                            export AI_ANALYZER_URL="${AI_ANALYZER_URL:-http://127.0.0.1:${AI_PORT}}"
                             export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
                             export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
                             export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
                             export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
                             export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
-                            # JENKINS_DB_PASSWORD and HUGGINGFACE_API_KEY come from Jenkins credentials()
-                            # Dashboard + ingest + AI all use this same PostgreSQL database.
+                            # JENKINS_DB_PASSWORD + HUGGINGFACE_API_KEY from Jenkins credentials()
+                            # Stack runs in Docker on network devsecops-net (postgres/ingest/ai/dashboard).
 
                             scripts/ensure-security-services.sh
-                            echo "Dashboard URL: http://$(hostname -I 2>/dev/null | awk '{print $1}'):${DASHBOARD_API_PORT:-4100}/ (login admin/admin)"
+                            echo "Docker network: devsecops-net"
+                            echo "Dashboard: http://127.0.0.1:${DASHBOARD_API_PORT:-4100}/ (admin/admin)"
+                            docker compose ps || true
                         '''
-                        logToPostgres('Start Services', 'SUCCESS', 'Security services running on shared Jenkins PostgreSQL')
+                        logToPostgres('Start Services', 'SUCCESS', 'Docker security stack up on devsecops-net')
                     }
                 }
             }

@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-dashboard
+  namespace: devsecops
+  labels:
+    app: security-dashboard
+    app.kubernetes.io/part-of: sentinelops
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 300
+  selector:
+    matchLabels:
+      app: security-dashboard
+  template:
+    metadata:
+      labels:
+        app: security-dashboard
+    spec:
+      containers:
+        - name: security-dashboard
+          image: sneproject/devsecops-dashboard:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4100
+              name: http
+          env:
+            - name: DASHBOARD_API_PORT
+              value: "4100"
+            - name: AI_ANALYZER_URL
+              value: http://ai-analyzer:4300
+            - name: JENKINS_DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: sentinelops-config
+                  key: JENKINS_DB_HOST
+                  optional: true
+            - name: JENKINS_DB_PORT
+              value: "5432"
+            - name: JENKINS_DB_NAME
+              value: jenkins
+            - name: JENKINS_DB_USER
+              value: jenkins
+            - name: JENKINS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: jenkins-db-password
+                  key: password
+                  optional: true
+            - name: DASHBOARD_MOCK_FALLBACK
+              value: "false"
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 8
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "50m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
