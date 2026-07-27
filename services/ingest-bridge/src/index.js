@@ -196,10 +196,14 @@ app.post(
       const findings = [...gitleaks, ...trivy, ...owasp];
 
       const stages = Array.isArray(meta.stages) ? meta.stages : [];
+      const stagesDuration = stages.reduce(
+        (sum, stage) => sum + Number(stage.durationSeconds || 0),
+        0,
+      );
       const durationSeconds =
-        meta.durationSeconds ??
-        stages.reduce((sum, stage) => sum + Number(stage.durationSeconds || 0), 0) ||
-        null;
+        meta.durationSeconds != null && meta.durationSeconds !== ''
+          ? Number(meta.durationSeconds)
+          : stagesDuration || null;
 
       await upsertStages(jobName, buildNumber, stages);
       await replaceFindings(jobName, buildNumber, findings);

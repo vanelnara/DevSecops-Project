@@ -15,8 +15,14 @@ pipeline {
         ARGOCD_APP_NAME    = 'devsecops-simple-shop'
         REPORTS_DIR        = 'reports'
         GIT_REPO           = 'https://github.com/vanelnara/DevSecops-Project.git'
+        // Security dashboard stack (override via Jenkins global env if needed)
         INGEST_URL         = "${env.INGEST_URL ?: 'http://127.0.0.1:4200/ingest/build'}"
         INGEST_TOKEN       = "${env.INGEST_TOKEN ?: ''}"
+        AI_ANALYZER_URL    = "${env.AI_ANALYZER_URL ?: 'http://127.0.0.1:4300'}"
+        DASHBOARD_API_PORT = "${env.DASHBOARD_API_PORT ?: '4100'}"
+        INGEST_PORT        = "${env.INGEST_PORT ?: '4200'}"
+        AI_PORT            = "${env.AI_PORT ?: '4300'}"
+        DEEPSEEK_CRED_ID   = 'deepseek-api-key'
     }
 
     options {
@@ -317,10 +323,52 @@ pipeline {
             }
         }
 
-        stage('Publish to Security Dashboard') {
+        stage('Start Security Services') {
             steps {
                 script {
-                    runLoggedStage('Dashboard Publish', 'Sending scanner reports to ingest bridge') {
+                    runLoggedStage('Start Services', 'Starting ingest, AI analyzer, and dashboard in background') {
+                        // DeepSeek key from Jenkins Secret text (ID: deepseek-api-key)
+                        // JENKINS_DB_PASSWORD comes from existing Jenkins env/credentials already used by log-to-postgresql.sh
+                        withCredentials([
+                            string(credentialsId: env.DEEPSEEK_CRED_ID, variable: 'DEEPSEEK_API_KEY')
+                        ]) {
+                            sh '''
+                                set -eu
+                                chmod +x scripts/ensure-security-services.sh \
+                                         scripts/publish-to-dashboard.sh \
+                                         scripts/trigger-ai-analysis.sh \
+                                         scripts/log-to-postgresql.sh
+
+                                # Fail early with a clear message if DB password is missing
+                                if [ -z "${JENKINS_DB_PASSWORD:-}" ]; then
+                                  echo "ERROR: JENKINS_DB_PASSWORD is not set in Jenkins environment."
+                                  echo "Add it under Manage Jenkins → System → Global properties (same value used by log-to-postgresql.sh)."
+                                  exit 2
+                                fi
+
+                                export INGEST_PORT="${INGEST_PORT}"
+                                export AI_PORT="${AI_PORT}"
+                                export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
+                                export INGEST_URL="${INGEST_URL}"
+                                export AI_ANALYZER_URL="${AI_ANALYZER_URL}"
+                                export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
+                                export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
+                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
+                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
+
+                                scripts/ensure-security-services.sh
+                            '''
+                        }
+                        logToPostgres('Start Services', 'SUCCESS', 'Security services running in background')
+                    }
+                }
+            }
+        }
+
+        stage('Store Security Findings') {
+            steps {
+                script {
+                    runLoggedStage('Store Findings', 'Uploading scanner reports to PostgreSQL via ingest bridge') {
                         def publishStatus = currentBuild.currentResult ?: 'SUCCESS'
                         withEnv([
                             "STATUS=${publishStatus}",
@@ -337,7 +385,6 @@ pipeline {
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
                                 export REPORTS_DIR="${REPORTS_DIR}"
                                 if [ -n "${BUILD_ID:-}" ]; then
-                                  # BUILD_ID is often yyyy-MM-dd_HH-mm-ss
                                   START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
                                   NOW_EPOCH="$(date +%s)"
                                   if [ -n "${START_EPOCH:-}" ]; then
@@ -347,7 +394,26 @@ pipeline {
                                 scripts/publish-to-dashboard.sh
                             '''
                         }
-                        logToPostgres('Dashboard Publish', 'SUCCESS', "Published build ${env.BUILD_NUMBER} to ingest bridge")
+                        logToPostgres('Store Findings', 'SUCCESS', "Stored findings for build ${env.BUILD_NUMBER}")
+                    }
+                }
+            }
+        }
+
+        stage('AI Security Analysis') {
+            steps {
+                script {
+                    runLoggedStage('AI Analysis', 'Sending stored findings to DeepSeek AI analyzer') {
+                        withEnv(["AI_ANALYZER_URL=${env.AI_ANALYZER_URL}"]) {
+                            sh '''
+                                set -eu
+                                chmod +x scripts/trigger-ai-analysis.sh
+                                export JOB_NAME="${JOB_NAME}"
+                                export BUILD_NUMBER="${BUILD_NUMBER}"
+                                scripts/trigger-ai-analysis.sh
+                            '''
+                        }
+                        logToPostgres('AI Analysis', 'SUCCESS', "AI analysis completed for build ${env.BUILD_NUMBER}")
                     }
                 }
             }

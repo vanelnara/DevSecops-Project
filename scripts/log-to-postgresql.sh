@@ -28,6 +28,30 @@ if [ -n "${DURATION_SECONDS}" ]; then
 fi
 
 psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 <<SQL
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id            SERIAL PRIMARY KEY,
+  job_name      TEXT NOT NULL,
+  build_number  INTEGER NOT NULL,
+  status        TEXT NOT NULL,
+  started_at    TIMESTAMPTZ DEFAULT NOW(),
+  finished_at   TIMESTAMPTZ DEFAULT NOW(),
+  log_excerpt   TEXT DEFAULT '',
+  UNIQUE (job_name, build_number)
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_stages (
+  id                SERIAL PRIMARY KEY,
+  job_name          TEXT NOT NULL,
+  build_number      INTEGER NOT NULL,
+  stage_name        TEXT NOT NULL,
+  status            TEXT NOT NULL,
+  started_at        TIMESTAMPTZ,
+  finished_at       TIMESTAMPTZ,
+  duration_seconds  INTEGER,
+  details           TEXT DEFAULT '',
+  UNIQUE (job_name, build_number, stage_name)
+);
+
 INSERT INTO pipeline_runs (job_name, build_number, status, started_at, finished_at, log_excerpt)
 VALUES (
   '${JOB_ESCAPED}',
