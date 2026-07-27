@@ -4,6 +4,12 @@ React + Express dashboard that visualizes **real Jenkins pipeline security resul
 
 There is **no mock data**. Until builds are ingested, the UI shows empty states.
 
+**Full lab setup** (Jenkins, Ansible, Argo CD, AI): see the root [README.md](../README.md) and [docs/SETUP_GUIDE.md](../docs/SETUP_GUIDE.md).
+
+**Default login (lab):** `admin` / `admin` — change in Settings after first login.
+
+**Ports:** API `:4100` (K8s NodePort **30410**). Dev UI `:5173`.
+
 ## Run locally
 
 ```bash

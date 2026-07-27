@@ -21,9 +21,13 @@ Copy `.env.example` values into your shell or Jenkins credentials. Never commit 
 ```bash
 # edit JENKINS_DB_PASSWORD and HUGGINGFACE_API_KEY
 docker compose up -d
-# or
+# or (preferred on Jenkins agent — host Node, DB on 127.0.0.1)
+scripts/ensure-ingest.sh
+scripts/ensure-ai.sh
 scripts/ensure-security-services.sh
 ```
+
+Jenkins pipeline stages call `ensure-ingest.sh` / `ensure-ai.sh` automatically before publish and analyze.
 
 Manual:
 

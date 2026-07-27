@@ -1,0 +1,18 @@
+# Copy to group_vars/all.yml — do not commit real secrets
+lab_timezone: UTC
+
+# Match these to your Jenkinsfile / k8s ConfigMaps
+jenkins_public_ip: "192.168.10.149"
+sonarqube_url: "http://192.168.10.149:9000"
+argocd_server: "192.168.10.149:30443"
+postgres_db: jenkins
+postgres_user: jenkins
+# postgres_password: set via Ansible Vault or prompt — never commit
+
+sonar_scanner_home: "/opt/sonar-scanner-6.2.1.4610-linux-x64"
+dependency_check_home: "/opt/dependency-check"
+jenkins_kubeconfig: "/var/lib/jenkins/.kube/config"
+
+dockerhub_org: "sneproject"
+github_repo: "https://github.com/vanelnara/DevSecops-Project.git"
+node_major: "20"

@@ -1,0 +1,59 @@
+---
+# Install Docker + Node tooling foundations on the Jenkins host.
+# Scanner binaries (gitleaks/trivy/cosign/sonar-scanner/dependency-check)
+# are often installed from upstream releases — this playbook prepares dirs
+# and Docker/Node, then prints exact follow-up commands.
+- name: Jenkins agent toolchain foundations
+  hosts: jenkins
+  become: true
+  vars:
+    node_major: "{{ node_major | default('20') }}"
+  tasks:
+    - name: Install Docker Engine prerequisites (Debian)
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Check if docker is already installed
+      ansible.builtin.command: docker --version
+      register: docker_check
+      changed_when: false
+      failed_when: false
+
+    - name: Advise Docker install if missing
+      ansible.builtin.debug:
+        msg: >-
+          Docker not detected. Install Docker CE for your distro, then:
+          usermod -aG docker jenkins && systemctl restart jenkins
+      when: docker_check.rc != 0
+
+    - name: Ensure opt directories for scanners exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - /opt
+        - "{{ dependency_check_home | default('/opt/dependency-check') }}"
+
+    - name: Install Node.js {{ node_major }} via NodeSource hint
+      ansible.builtin.debug:
+        msg: >-
+          Install Node {{ node_major }} (example):
+          curl -fsSL https://deb.nodesource.com/setup_{{ node_major }}.x | bash -
+          apt-get install -y nodejs
+
+    - name: Print scanner install checklist
+      ansible.builtin.debug:
+        msg:
+          - "Unpack SonarScanner to {{ sonar_scanner_home | default('/opt/sonar-scanner-6.2.1.4610-linux-x64') }}"
+          - "Install OWASP Dependency-Check under {{ dependency_check_home | default('/opt/dependency-check') }}"
+          - "Install gitleaks, trivy, cosign, kubectl, argocd onto PATH"
+          - "Place kubeconfig at {{ jenkins_kubeconfig | default('/var/lib/jenkins/.kube/config') }} (mode 0600, owner jenkins)"
+          - "Start SonarQube: docker start sonarqube || docker run ... -p 9000:9000 sonarqube:lts-community"

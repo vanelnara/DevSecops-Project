@@ -17,3 +17,6 @@ cosign.pub
 *.pem
 vars/credentials.yml
 vars/github-token
+ansible/inventory/hosts.yml
+ansible/group_vars/all.yml
+ansible/**/*.vault.yml

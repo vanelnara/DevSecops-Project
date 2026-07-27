@@ -1,0 +1,30 @@
+---
+# Ensure PostgreSQL client tools exist; remind operator to create DB role.
+- name: PostgreSQL client and DB reminders
+  hosts: jenkins
+  become: true
+  tasks:
+    - name: Install postgresql-client (Debian)
+      ansible.builtin.apt:
+        name:
+          - postgresql-client
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Print SQL bootstrap
+      ansible.builtin.debug:
+        msg: |
+          On the Postgres server (local or remote), run:
+
+            CREATE USER jenkins WITH PASSWORD 'CHANGE_ME';
+            CREATE DATABASE jenkins OWNER jenkins;
+
+          Then from the DevSecops-Project clone on the Jenkins host:
+
+            export JENKINS_DB_HOST=127.0.0.1
+            export JENKINS_DB_PASSWORD='CHANGE_ME'
+            scripts/apply-db-migrations.sh
+
+          Store the same password in Jenkins credential ID: jenkins-db-password
+          Set JENKINS_DB_HOST in k8s ConfigMaps to the IP pods can reach
+          (lab example: 192.168.10.149).

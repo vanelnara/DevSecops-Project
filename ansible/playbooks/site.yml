@@ -1,0 +1,10 @@
+---
+# Run all starter playbooks in order
+- name: Include common baseline
+  ansible.builtin.import_playbook: 01-common.yml
+
+- name: Include Jenkins agent foundations
+  ansible.builtin.import_playbook: 02-jenkins-agent-tools.yml
+
+- name: Include Postgres reminders
+  ansible.builtin.import_playbook: 03-postgres.yml
