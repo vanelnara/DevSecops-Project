@@ -13,6 +13,23 @@ import {
   listFindings,
   updateFindingStatus,
 } from './dashboardRepository.js';
+import {
+  authenticateUser,
+  clearSessionCookie,
+  createSession,
+  changeCredentials,
+  createUser,
+  destroySession,
+  ensureDefaultAdmin,
+  ensureUserSchema,
+  getUserBySession,
+  listChatMessages,
+  listUserActivity,
+  parseCookies,
+  saveChatMessage,
+  sessionCookie,
+  updateUserPreferences,
+} from './userRepository.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +50,7 @@ function loadEnvFile(filePath) {
       ) {
         value = value.slice(1, -1);
       }
-      if (!(key in process.env)) process.env[key] = value;
+      if (!process.env[key]) process.env[key] = value;
     }
   } catch (error) {
     console.warn(`Unable to load env file ${filePath}: ${error.message}`);
@@ -47,8 +64,40 @@ const app = express();
 const port = Number(process.env.DASHBOARD_API_PORT || 4100);
 const aiUrl = process.env.AI_ANALYZER_URL || 'http://127.0.0.1:4300';
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
+let userSchemaReady = false;
+async function bootstrapUserSchema() {
+  if (userSchemaReady) return;
+  try {
+    await ensureUserSchema();
+    await ensureDefaultAdmin();
+    userSchemaReady = true;
+  } catch (error) {
+    console.warn(`User schema not ready yet: ${error.message}`);
+  }
+}
+
+async function attachUser(req, _res, next) {
+  try {
+    await bootstrapUserSchema();
+    const cookies = parseCookies(req.headers.cookie);
+    req.user = await getUserBySession(cookies.sentinelops_session);
+  } catch {
+    req.user = null;
+  }
+  next();
+}
+
+app.use(attachUser);
+
+function requireUser(req, res) {
+  if (!req.user) {
+    res.status(401).json({ error: 'Sign in required' });
+    return false;
+  }
+  return true;
+}
 app.get('/api/health', async (_req, res) => {
   const database = await dbHealthy();
   let ai = { online: false, url: aiUrl };
@@ -69,6 +118,113 @@ app.get('/api/health', async (_req, res) => {
     ai,
     mockFallback: false,
   });
+});
+
+app.get('/api/auth/me', async (req, res) => {
+  if (!req.user) return res.json({ authenticated: false, user: null });
+  return res.json({ authenticated: true, user: req.user });
+});
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    await bootstrapUserSchema();
+    const user = await createUser({
+      username: req.body?.username,
+      email: req.body?.email,
+      password: req.body?.password,
+      displayName: req.body?.displayName || req.body?.username,
+      themePreference: req.body?.themePreference || 'system',
+    });
+    const session = await createSession(user.id);
+    res.setHeader('Set-Cookie', sessionCookie(session.token, session.expiresAt));
+    return res.status(201).json({ authenticated: true, user, expiresAt: session.expiresAt });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Registration failed' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    await bootstrapUserSchema();
+    const user = await authenticateUser(req.body?.login || req.body?.username || req.body?.email, req.body?.password);
+    const session = await createSession(user.id);
+    res.setHeader('Set-Cookie', sessionCookie(session.token, session.expiresAt));
+    return res.json({ authenticated: true, user, expiresAt: session.expiresAt });
+  } catch (error) {
+    return res.status(401).json({ error: error.message || 'Login failed' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  await destroySession(cookies.sentinelops_session);
+  res.setHeader('Set-Cookie', clearSessionCookie());
+  return res.json({ authenticated: false, user: null });
+});
+
+app.patch('/api/auth/me', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    const user = await updateUserPreferences(req.user.id, {
+      themePreference: req.body?.themePreference,
+      displayName: req.body?.displayName,
+    });
+    return res.json({ authenticated: true, user });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Failed to update profile' });
+  }
+});
+
+app.post('/api/auth/change-credentials', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    await bootstrapUserSchema();
+    const user = await changeCredentials(req.user.id, {
+      currentUsername: req.body?.currentUsername || req.body?.oldUsername,
+      currentPassword: req.body?.currentPassword || req.body?.oldPassword,
+      newUsername: req.body?.newUsername,
+      confirmNewUsername: req.body?.confirmNewUsername,
+      newPassword: req.body?.newPassword,
+      confirmNewPassword: req.body?.confirmNewPassword,
+    });
+    return res.json({ authenticated: true, user, message: 'Credentials updated successfully' });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Failed to change credentials' });
+  }
+});
+
+app.get('/api/auth/activity', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    const activity = await listUserActivity(req.user.id, req.query.limit);
+    return res.json({ activity });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to load activity' });
+  }
+});
+
+app.get('/api/auth/chat', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    const messages = await listChatMessages(req.user.id, {
+      jobName: req.query.job || req.query.jobName,
+      buildNumber: req.query.build || req.query.buildNumber,
+      limit: req.query.limit,
+    });
+    return res.json({
+      messages: messages.map((row) => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        jobName: row.job_name,
+        buildNumber: row.build_number,
+        meta: row.meta,
+        createdAt: row.created_at,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to load chat history' });
+  }
 });
 
 app.get('/api/ai/status', async (_req, res) => {
@@ -133,6 +289,7 @@ app.get('/api/findings', async (req, res) => {
       jobName: req.query.job || req.query.jobName,
       buildNumber: req.query.build || req.query.buildNumber,
       limit: req.query.limit,
+      userId: req.user?.id,
     });
     return res.json({ findings, count: findings.length });
   } catch (error) {
@@ -164,7 +321,7 @@ app.get('/api/builds/:jobName/:buildNumber', async (req, res) => {
 
 app.get('/api/findings/:id', async (req, res) => {
   try {
-    const finding = await getFindingById(req.params.id);
+    const finding = await getFindingById(req.params.id, req.user?.id);
     if (!finding) return res.status(404).json({ error: 'Finding not found' });
     return res.json(finding);
   } catch (error) {
@@ -177,7 +334,8 @@ app.patch('/api/findings/:id', async (req, res) => {
   try {
     const status = String(req.body?.status || '').trim();
     if (!status) return res.status(400).json({ error: 'status is required' });
-    const finding = await updateFindingStatus(req.params.id, status);
+    const actor = req.user?.displayName || req.user?.username || 'Dashboard';
+    const finding = await updateFindingStatus(req.params.id, status, actor, req.user?.id || null);
     if (!finding) return res.status(404).json({ error: 'Finding not found' });
     return res.json(finding);
   } catch (error) {
@@ -193,6 +351,15 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 
   try {
+    if (req.user) {
+      await saveChatMessage(req.user.id, {
+        role: 'user',
+        content: question,
+        jobName: req.body?.jobName,
+        buildNumber: req.body?.buildNumber,
+      });
+    }
+
     const response = await fetch(`${aiUrl}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -214,6 +381,21 @@ app.post('/api/ai/chat', async (req, res) => {
     if (!response.ok) {
       throw new Error(payload.error || `AI analyzer returned ${response.status}`);
     }
+
+    if (req.user && payload.answer) {
+      await saveChatMessage(req.user.id, {
+        role: 'assistant',
+        content: payload.answer,
+        jobName: req.body?.jobName,
+        buildNumber: req.body?.buildNumber,
+        meta: {
+          model: payload.model,
+          citations: payload.citations || [],
+          needsPipeline: payload.needsPipeline || false,
+        },
+      });
+    }
+
     return res.json(payload);
   } catch (error) {
     return res.status(502).json({
@@ -275,5 +457,6 @@ app.use((req, res, next) => {
 });
 
 app.listen(port, () => {
+  bootstrapUserSchema().catch(() => {});
   console.log(`Security dashboard API listening on http://localhost:${port}`);
 });

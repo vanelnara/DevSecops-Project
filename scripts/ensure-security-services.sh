@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Ensure ingest-bridge, AI analyzer, and security-dashboard are running in background.
-# Idempotent: skips start when health checks already pass.
+# Uses the same PostgreSQL instance as Jenkins (JENKINS_DB_*).
+# Idempotent for ingest/AI; dashboard is rebuilt/restarted so pipeline always ships latest UI.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -70,13 +71,28 @@ stop_stale() {
   fi
 }
 
+free_port() {
+  local port="$1"
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+  elif command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids="$(lsof -t -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "${pids}" ]; then
+      # shellcheck disable=SC2086
+      kill ${pids} 2>/dev/null || true
+      sleep 1
+      # shellcheck disable=SC2086
+      kill -9 ${pids} 2>/dev/null || true
+    fi
+  fi
+}
+
 npm_prepare() {
   local dir="$1"
   echo "Installing dependencies in ${dir}"
   (
     cd "${dir}"
-    # Prefer a clean lockfile install, but fall back when package.json and
-    # package-lock.json drift (common after adding deps like pg).
     if [ -f package-lock.json ]; then
       if ! npm ci --no-audit --no-fund; then
         echo "WARN: npm ci failed in ${dir}; falling back to npm install"
@@ -93,10 +109,11 @@ start_bg() {
   local dir="$2"
   local cmd="$3"
   local health_url="$4"
+  local force_restart="${5:-0}"
   local log_file="${LOG_DIR}/${name}.log"
   local pid_file="${PID_DIR}/${name}.pid"
 
-  if healthy "${health_url}"; then
+  if [ "${force_restart}" != "1" ] && healthy "${health_url}"; then
     echo "${name} already running (${health_url})"
     return 0
   fi
@@ -115,8 +132,7 @@ start_bg() {
     export HUGGINGFACE_API_KEY="${HUGGINGFACE_API_KEY:-}"
     export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
     export HUGGINGFACE_API_URL="${HUGGINGFACE_API_URL:-https://router.huggingface.co/v1/chat/completions}"
-    export DASHBOARD_MOCK_FALLBACK="${DASHBOARD_MOCK_FALLBACK:-true}"
-    # nohup so process survives after Jenkins step ends
+    export DASHBOARD_MOCK_FALLBACK="${DASHBOARD_MOCK_FALLBACK:-false}"
     nohup bash -lc "${cmd}" >>"${log_file}" 2>&1 &
     echo $! >"${pid_file}"
   )
@@ -127,6 +143,11 @@ start_bg() {
 echo "=== Ensuring security services ==="
 echo "Project root: ${ROOT}"
 echo "Runtime dir:  ${RUNTIME_DIR}"
+echo "Database:     ${JENKINS_DB_USER}@${JENKINS_DB_HOST}:${JENKINS_DB_PORT}/${JENKINS_DB_NAME}"
+
+# 0) Shared Jenkins PostgreSQL schema (findings + dashboard users/sessions)
+chmod +x "${ROOT}/scripts/apply-db-migrations.sh"
+"${ROOT}/scripts/apply-db-migrations.sh"
 
 # 1) Ingest bridge
 start_bg \
@@ -142,19 +163,26 @@ start_bg \
   "node src/index.js" \
   "http://127.0.0.1:${AI_PORT}/health"
 
-# 3) Security dashboard (API + built UI on :4100)
+# 3) Security dashboard — rebuild + restart so Jenkins always serves the latest login UI
 DASHBOARD_DIR="${ROOT}/security-dashboard"
-if [ ! -f "${DASHBOARD_DIR}/dist/index.html" ]; then
-  echo "Building security-dashboard UI (first time)..."
-  npm_prepare "${DASHBOARD_DIR}"
-  (cd "${DASHBOARD_DIR}" && npm run build)
-fi
+echo "Building security-dashboard UI..."
+npm_prepare "${DASHBOARD_DIR}"
+(cd "${DASHBOARD_DIR}" && npm run build)
+
+stop_stale "security-dashboard"
+free_port "${DASHBOARD_PORT}"
 
 start_bg \
   "security-dashboard" \
   "${DASHBOARD_DIR}" \
   "node server/index.js" \
-  "http://127.0.0.1:${DASHBOARD_PORT}/api/health"
+  "http://127.0.0.1:${DASHBOARD_PORT}/api/health" \
+  "1"
+
+# Seed/verify default admin against Jenkins DB (idempotent)
+curl --silent --show-error --fail --max-time 5 \
+  "http://127.0.0.1:${DASHBOARD_PORT}/api/health" >/dev/null
+echo "Dashboard login defaults: admin / admin (change under Settings)"
 
 echo "=== All security services are up ==="
 echo "Ingest:    http://127.0.0.1:${INGEST_PORT}/health"

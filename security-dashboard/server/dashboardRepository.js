@@ -264,60 +264,112 @@ export async function listFindings(filters = {}) {
     jobName,
     buildNumber,
     limit = 100,
+    userId,
   } = filters;
 
   const clauses = [];
   const params = [];
+  const statusExpr = userId
+    ? 'COALESCE(ufs.status, f.status)'
+    : 'f.status';
 
   if (jobName) {
     params.push(jobName);
-    clauses.push(`job_name = $${params.length}`);
+    clauses.push(`f.job_name = $${params.length}`);
   }
   if (buildNumber) {
     params.push(Number(buildNumber));
-    clauses.push(`build_number = $${params.length}`);
+    clauses.push(`f.build_number = $${params.length}`);
   }
   if (severity && severity !== 'all') {
     params.push(severity);
-    clauses.push(`severity = $${params.length}`);
+    clauses.push(`f.severity = $${params.length}`);
   }
   if (status && status !== 'all') {
     params.push(status);
-    clauses.push(`status = $${params.length}`);
+    clauses.push(`${statusExpr} = $${params.length}`);
   }
   if (source && source !== 'all') {
     params.push(source);
-    clauses.push(`source = $${params.length}`);
+    clauses.push(`f.source = $${params.length}`);
   }
   if (q) {
     params.push(`%${q}%`);
-    clauses.push(`(title ILIKE $${params.length} OR finding_key ILIKE $${params.length} OR asset ILIKE $${params.length})`);
+    clauses.push(`(f.title ILIKE $${params.length} OR f.finding_key ILIKE $${params.length} OR f.asset ILIKE $${params.length})`);
+  }
+
+  let joinSql = '';
+  if (userId) {
+    params.push(Number(userId));
+    joinSql = `LEFT JOIN user_finding_states ufs ON ufs.finding_id = f.id AND ufs.user_id = $${params.length}`;
   }
 
   params.push(Math.min(Number(limit) || 100, 500));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const result = await query(
-    `SELECT * FROM findings
+    `SELECT f.*, ${statusExpr} AS effective_status
+     FROM findings f
+     ${joinSql}
      ${where}
-     ORDER BY CASE severity
+     ORDER BY CASE f.severity
        WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-       created_at DESC
+       f.created_at DESC
      LIMIT $${params.length}`,
     params,
   );
-  return result.rows.map(mapFinding);
+  return result.rows.map((row) => {
+    const mapped = mapFinding(row);
+    mapped.status = row.effective_status || mapped.status;
+    return mapped;
+  });
 }
 
-export async function getFindingById(id) {
+export async function getFindingById(id, userId) {
+  if (userId) {
+    const result = await query(
+      `SELECT f.*, COALESCE(ufs.status, f.status) AS effective_status
+       FROM findings f
+       LEFT JOIN user_finding_states ufs ON ufs.finding_id = f.id AND ufs.user_id = $2
+       WHERE f.id = $1`,
+      [Number(id), Number(userId)],
+    );
+    if (!result.rows[0]) return null;
+    const mapped = mapFinding(result.rows[0]);
+    mapped.status = result.rows[0].effective_status || mapped.status;
+    return mapped;
+  }
   const result = await query(`SELECT * FROM findings WHERE id = $1`, [Number(id)]);
   return result.rows[0] ? mapFinding(result.rows[0]) : null;
 }
 
-export async function updateFindingStatus(id, status) {
+export async function updateFindingStatus(id, status, actor = 'Dashboard', userId = null) {
   const allowed = new Set(['open', 'triage', 'in-progress', 'accepted', 'resolved', 'false-positive']);
   if (!allowed.has(status)) {
     throw new Error(`Invalid status: ${status}`);
   }
+
+  // Prefer per-user status when authenticated so each analyst keeps their own triage state.
+  if (userId) {
+    const existing = await query(`SELECT * FROM findings WHERE id = $1`, [Number(id)]);
+    if (!existing.rows[0]) return null;
+    await query(
+      `INSERT INTO user_finding_states (user_id, finding_id, status, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (user_id, finding_id) DO UPDATE SET
+         status = EXCLUDED.status,
+         updated_at = NOW()`,
+      [Number(userId), Number(id), status],
+    );
+    const finding = mapFinding(existing.rows[0]);
+    finding.status = status;
+    await query(
+      `INSERT INTO activity_events (job_name, build_number, actor, action)
+       VALUES ($1, $2, $3, $4)`,
+      [finding.jobName, finding.buildNumber, actor, `Set ${finding.findingKey} to ${status}`],
+    );
+    return finding;
+  }
+
   const result = await query(
     `UPDATE findings SET status = $1 WHERE id = $2 RETURNING *`,
     [status, Number(id)],
@@ -327,7 +379,7 @@ export async function updateFindingStatus(id, status) {
     await query(
       `INSERT INTO activity_events (job_name, build_number, actor, action)
        VALUES ($1, $2, $3, $4)`,
-      [finding.jobName, finding.buildNumber, 'Dashboard', `Set ${finding.findingKey} to ${status}`],
+      [finding.jobName, finding.buildNumber, actor, `Set ${finding.findingKey} to ${status}`],
     );
   }
   return finding;

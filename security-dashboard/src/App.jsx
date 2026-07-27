@@ -27,7 +27,10 @@ import {
   Sun,
   Moon,
   Monitor,
+  LogOut,
   TrendingDown,
+  User,
+  UserRound,
   Workflow,
   X,
   Zap,
@@ -47,6 +50,8 @@ import {
   YAxis,
 } from 'recharts';
 import AIView from './AIView.jsx';
+import LoginPage from './LoginPage.jsx';
+import SettingsView from './SettingsView.jsx';
 
 const VIEWS = {
   overview: 'Security overview',
@@ -133,20 +138,25 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
-function Sidebar({ open, onClose, view, onNavigate, counts }) {
+function Sidebar({ open, onClose, view, onNavigate, counts, user }) {
   const items = [
     { id: 'overview', label: 'Security overview', icon: LayoutDashboard },
     { id: 'pipelines', label: 'Pipelines', icon: Workflow, count: counts.builds },
     { id: 'findings', label: 'Findings', icon: ShieldAlert, count: counts.findings },
     { id: 'ai', label: 'AI investigations', icon: Bot },
   ];
+  const initials = user?.displayName
+    ? user.displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
+    : 'DL';
 
   return (
     <>
       {open && <button className="sidebar-scrim" onClick={onClose} aria-label="Close navigation" />}
       <aside className={classNames('sidebar', open && 'sidebar-open')}>
         <div className="brand">
-          <div className="brand-mark"><Shield size={19} /></div>
+          <div className="brand-mark">
+            <img src="/sentinelops-logo.png" alt="" width={36} height={36} />
+          </div>
           <div>
             <strong>SentinelOps</strong>
             <span>Security Intelligence</span>
@@ -155,10 +165,10 @@ function Sidebar({ open, onClose, view, onNavigate, counts }) {
         </div>
 
         <div className="workspace-switcher">
-          <div className="workspace-avatar">DL</div>
+          <div className="workspace-avatar">{initials}</div>
           <div>
-            <strong>DevSecOps Lab</strong>
-            <span>Live pipeline workspace</span>
+            <strong>{user?.displayName || 'DevSecOps Lab'}</strong>
+            <span>{user ? `@${user.username}` : 'Guest workspace'}</span>
           </div>
         </div>
 
@@ -199,7 +209,39 @@ function Sidebar({ open, onClose, view, onNavigate, counts }) {
   );
 }
 
-function Header({ onMenu, title, generatedAt, onRefresh, refreshing, search, onSearch }) {
+function Header({
+  onMenu,
+  title,
+  generatedAt,
+  onRefresh,
+  refreshing,
+  search,
+  onSearch,
+  user,
+  onOpenSettings,
+  onLogout,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const initials = user?.displayName
+    ? user.displayName.split(/\s+/).map((part) => part[0]).join('').slice(0, 2).toUpperCase()
+    : null;
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    function onDocClick(event) {
+      if (!event.target.closest('.user-menu')) setMenuOpen(false);
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menuOpen]);
+
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -221,6 +263,70 @@ function Header({ onMenu, title, generatedAt, onRefresh, refreshing, search, onS
         <button className="icon-button" onClick={onRefresh} title={`Updated ${generatedAt}`}>
           <RefreshCw size={18} className={refreshing ? 'spin' : ''} />
         </button>
+
+        <div className="user-menu">
+          <button
+            type="button"
+            className={classNames('user-menu-trigger', user && 'signed-in', menuOpen && 'open')}
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            title={user ? user.displayName : 'Account'}
+          >
+            {initials ? <span className="user-menu-avatar">{initials}</span> : <UserRound size={18} />}
+          </button>
+          {menuOpen ? (
+            <div className="user-menu-popover" role="menu">
+              {user ? (
+                <>
+                  <div className="user-menu-identity">
+                    <strong>{user.displayName}</strong>
+                    <span>@{user.username}</span>
+                    <em>{user.email}</em>
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenSettings();
+                    }}
+                  >
+                    <User size={15} /> Account settings
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="danger"
+                    onClick={async () => {
+                      setMenuOpen(false);
+                      await onLogout();
+                    }}
+                  >
+                    <LogOut size={15} /> Log out
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="user-menu-identity guest">
+                    <strong>Guest</strong>
+                    <span>Sign in to save your workspace</span>
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onOpenSettings();
+                    }}
+                  >
+                    <User size={15} /> Sign in / Create account
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );
@@ -719,54 +825,6 @@ function FindingsView({
   );
 }
 
-function SettingsView({ themePreference, resolvedTheme, onThemeChange }) {
-  const options = [
-    { id: 'system', label: 'System', icon: Monitor },
-    { id: 'dark', label: 'Dark', icon: Moon },
-    { id: 'light', label: 'Light', icon: Sun },
-  ];
-
-  return (
-    <main className="dashboard">
-      <div className="view-toolbar">
-        <div>
-          <h2>Settings</h2>
-          <p>Preferences for this browser</p>
-        </div>
-      </div>
-
-      <Panel title="Appearance" subtitle="Defaults to your system theme">
-        <div className="settings-row">
-          <div>
-            <strong>Theme</strong>
-            <span>
-              {themePreference === 'system'
-                ? `Using system (${resolvedTheme})`
-                : `${resolvedTheme} mode`}
-            </span>
-          </div>
-          <div className="theme-segment" role="radiogroup" aria-label="Theme">
-            {options.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                type="button"
-                role="radio"
-                aria-checked={themePreference === id}
-                className={classNames('theme-segment-btn', themePreference === id && 'active')}
-                onClick={() => onThemeChange(id)}
-                title={label}
-              >
-                <Icon size={15} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </Panel>
-    </main>
-  );
-}
-
 export default function App() {
   const [view, setView] = useState('overview');
   const [themePreference, setThemePreference] = useState(() => readThemePreference());
@@ -786,8 +844,40 @@ export default function App() {
   const [selectedBuildDetail, setSelectedBuildDetail] = useState(null);
   const [selectedFinding, setSelectedFinding] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   const selectedBuild = data?.selectedBuild;
+
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (payload.user) {
+          setUser(payload.user);
+          if (payload.user.themePreference) setThemePreference(payload.user.themePreference);
+        } else {
+          setUser(null);
+        }
+      })
+      .catch(() => setUser(null))
+      .finally(() => setAuthChecked(true));
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    } catch {
+      /* clear local session anyway */
+    }
+    setUser(null);
+    setView('overview');
+  }
+
+  function handleAuthenticated(nextUser) {
+    setUser(nextUser);
+    if (nextUser?.themePreference) setThemePreference(nextUser.themePreference);
+  }
 
   async function loadDashboard(jobName, buildNumber) {
     setRefreshing(true);
@@ -866,8 +956,8 @@ export default function App() {
       if (selectedBuild?.jobName) findingsParams.set('job', selectedBuild.jobName);
 
       const [buildsRes, findingsRes] = await Promise.all([
-        fetch('/api/builds?limit=100'),
-        fetch(`/api/findings?${findingsParams.toString()}&limit=200`),
+        fetch('/api/builds?limit=100', { credentials: 'include' }),
+        fetch(`/api/findings?${findingsParams.toString()}&limit=200`, { credentials: 'include' }),
       ]);
       const buildsJson = await buildsRes.json();
       const findingsJson = await findingsRes.json();
@@ -935,6 +1025,7 @@ export default function App() {
     const response = await fetch(`/api/findings/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ status }),
     });
     const updated = await response.json();
@@ -976,6 +1067,19 @@ export default function App() {
     return new Date(data.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }, [data?.generatedAt]);
 
+  if (!authChecked) {
+    return <LoadingState />;
+  }
+
+  if (!user) {
+    return (
+      <LoginPage
+        onAuthenticated={handleAuthenticated}
+        resolvedTheme={resolvedTheme}
+      />
+    );
+  }
+
   if (!data) return <LoadingState />;
 
   return (
@@ -985,6 +1089,7 @@ export default function App() {
         onClose={() => setSidebarOpen(false)}
         view={view}
         onNavigate={setView}
+        user={user}
         counts={{
           builds: data.summary.totalBuilds || builds.length,
           findings: data.summary.totalFindings || findings.length,
@@ -1003,6 +1108,9 @@ export default function App() {
           refreshing={refreshing}
           search={search}
           onSearch={setSearch}
+          user={user}
+          onOpenSettings={() => setView('settings')}
+          onLogout={handleLogout}
         />
 
         {error ? (
@@ -1053,6 +1161,7 @@ export default function App() {
             onSelectBuild={selectBuild}
             onAnalyze={rerunAnalysis}
             analyzing={analyzing}
+            user={user}
             onRefresh={() => {
               loadDashboard(selectedBuild?.jobName, selectedBuild?.buildNumber);
               loadLists();
@@ -1064,6 +1173,12 @@ export default function App() {
             themePreference={themePreference}
             resolvedTheme={resolvedTheme}
             onThemeChange={setThemePreference}
+            user={user}
+            onAuthChange={setUser}
+            onLogout={handleLogout}
+            Monitor={Monitor}
+            Moon={Moon}
+            Sun={Sun}
           />
         )}
 

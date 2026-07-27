@@ -373,6 +373,7 @@ pipeline {
                         sh '''
                             set -eu
                             chmod +x scripts/ensure-security-services.sh \
+                                     scripts/apply-db-migrations.sh \
                                      scripts/publish-to-dashboard.sh \
                                      scripts/trigger-ai-analysis.sh \
                                      scripts/log-to-postgresql.sh
@@ -389,10 +390,12 @@ pipeline {
                             export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
                             # JENKINS_DB_PASSWORD and HUGGINGFACE_API_KEY come from Jenkins credentials()
+                            # Dashboard + ingest + AI all use this same PostgreSQL database.
 
                             scripts/ensure-security-services.sh
+                            echo "Dashboard URL: http://$(hostname -I 2>/dev/null | awk '{print $1}'):${DASHBOARD_API_PORT:-4100}/ (login admin/admin)"
                         '''
-                        logToPostgres('Start Services', 'SUCCESS', 'Security services running in background')
+                        logToPostgres('Start Services', 'SUCCESS', 'Security services running on shared Jenkins PostgreSQL')
                     }
                 }
             }

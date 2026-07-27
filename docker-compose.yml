@@ -11,6 +11,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations/001_security_dashboard.sql:/docker-entrypoint-initdb.d/001_security_dashboard.sql:ro
+      - ./db/migrations/002_dashboard_users.sql:/docker-entrypoint-initdb.d/002_dashboard_users.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jenkins -d jenkins"]
       interval: 5s

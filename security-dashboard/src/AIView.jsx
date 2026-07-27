@@ -54,6 +54,7 @@ export default function AIView({
   onAnalyze,
   analyzing,
   onRefresh,
+  user,
 }) {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState([]);
@@ -103,29 +104,49 @@ export default function AIView({
       ]);
       setSuggestions(DEFAULT_SUGGESTIONS);
       setQuestion('');
-      return;
+    } else {
+      setMessages([
+        {
+          role: 'assistant',
+          content: analysis?.verdict
+            ? `Loaded ${selectedBuild.jobName} #${selectedBuild.buildNumber}. ${analysis.verdict}`
+            : `Build #${selectedBuild.buildNumber} is loaded. Ask about findings, or click Re-run analysis for a fresh remediation plan.`,
+        },
+      ]);
+      setSuggestions([
+        'What should I fix first?',
+        'Summarize this build risk',
+        'Draft a remediation plan',
+      ]);
+      setQuestion('');
     }
 
-    setMessages([
-      {
-        role: 'assistant',
-        content: analysis?.verdict
-          ? `Loaded ${selectedBuild.jobName} #${selectedBuild.buildNumber}. ${analysis.verdict}`
-          : `Build #${selectedBuild.buildNumber} is loaded. Ask about findings, or click Re-run analysis for a fresh remediation plan.`,
-      },
-    ]);
-    setSuggestions([
-      'What should I fix first?',
-      'Summarize this build risk',
-      'Draft a remediation plan',
-    ]);
-    setQuestion('');
+    if (!user) return undefined;
+    let cancelled = false;
+    const params = new URLSearchParams({ limit: '40' });
+    if (selectedBuild?.jobName) params.set('job', selectedBuild.jobName);
+    if (selectedBuild?.buildNumber) params.set('build', String(selectedBuild.buildNumber));
+    fetch(`/api/auth/chat?${params.toString()}`, { credentials: 'include' })
+      .then((res) => res.json())
+      .then((payload) => {
+        if (cancelled || !payload.messages?.length) return;
+        setMessages(payload.messages.map((row) => ({
+          role: row.role,
+          content: row.content,
+          citations: row.meta?.citations,
+          needsPipeline: row.meta?.needsPipeline,
+          model: row.meta?.model,
+        })));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
   }, [
     hasLive,
     selectedBuild?.jobName,
     selectedBuild?.buildNumber,
     analysis?.verdict,
     agentStatus.agent?.name,
+    user?.id,
   ]);
 
   async function ask(nextQuestion) {
@@ -143,6 +164,7 @@ export default function AIView({
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           question: trimmed,
           jobName: selectedBuild?.jobName,
