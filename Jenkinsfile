@@ -141,13 +141,32 @@ pipeline {
                                   exit 2
                                 fi
 
-                                mkdir -p reports/dependency-check
+                                ODC_DATA="/var/lib/jenkins/.dependency-check"
+                                mkdir -p "${ODC_DATA}" reports/dependency-check
+
+                                # Unblock hangs from crashed/previous runs that left odc.update.lock behind.
+                                LOCK_FILE="${ODC_DATA}/odc.update.lock"
+                                if [ -f "${LOCK_FILE}" ]; then
+                                  if pgrep -f 'dependency-check(\\.sh|\\.jar)' >/dev/null 2>&1; then
+                                    echo "WARN: dependency-check already running; waiting up to 10 minutes for lock..."
+                                    waited=0
+                                    while [ -f "${LOCK_FILE}" ] && [ "${waited}" -lt 600 ]; do
+                                      sleep 10
+                                      waited=$((waited + 10))
+                                    done
+                                  fi
+                                  if [ -f "${LOCK_FILE}" ]; then
+                                    echo "Removing stale OWASP lock: ${LOCK_FILE}"
+                                    rm -f "${LOCK_FILE}"
+                                  fi
+                                fi
+
                                 /opt/dependency-check/bin/dependency-check.sh \
                                   --project "${APP_NAME}" \
                                   --scan microservice \
                                   --format ALL \
                                   --out reports/dependency-check \
-                                  --data /var/lib/jenkins/.dependency-check \
+                                  --data "${ODC_DATA}" \
                                   --suppression security/dependency-check-suppressions.xml \
                                   --disableYarnAudit \
                                   --disableOssIndex \
