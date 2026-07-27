@@ -23,7 +23,8 @@ pipeline {
         AI_ANALYZER_URL    = 'http://127.0.0.1:4300'
         DASHBOARD_API_PORT = "${env.DASHBOARD_API_PORT ?: '4100'}"
         INGEST_PORT        = '4200'
-        AI_PORT            = '4300'        AI_PROVIDER        = 'huggingface'
+        AI_PORT            = '4300'
+        AI_PROVIDER        = 'huggingface'
         HUGGINGFACE_MODEL  = "${env.HUGGINGFACE_MODEL ?: 'Qwen/Qwen2.5-7B-Instruct:fastest'}"
         // Jenkins Credentials (Secret text) — create these IDs in Jenkins UI
         JENKINS_DB_PASSWORD  = credentials('jenkins-db-password')
@@ -434,16 +435,16 @@ pipeline {
                         sh '''
                             set -eu
                             chmod +x scripts/ensure-security-services.sh \
+                                     scripts/ensure-ingest.sh \
                                      scripts/apply-db-migrations.sh \
                                      scripts/publish-to-dashboard.sh \
                                      scripts/trigger-ai-analysis.sh \
                                      scripts/log-to-postgresql.sh
 
-                            export INGEST_PORT="${INGEST_PORT}"
-                            export AI_PORT="${AI_PORT}"
-                            export DASHBOARD_API_PORT="${DASHBOARD_API_PORT}"
-                            # Prefer localhost for publish/AI so we hit the services started on this agent.
-                            export INGEST_URL="http://127.0.0.1:${INGEST_PORT}/ingest/build"
+                            export INGEST_PORT="4200"
+                            export AI_PORT="${AI_PORT:-4300}"
+                            export DASHBOARD_API_PORT="${DASHBOARD_API_PORT:-4100}"
+                            export INGEST_URL="http://127.0.0.1:4200/ingest/build"
                             export AI_ANALYZER_URL="http://127.0.0.1:${AI_PORT}"
                             export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
                             export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
@@ -453,12 +454,14 @@ pipeline {
                             export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
                             unset COMPOSE_DB_HOST || true
 
-                            scripts/ensure-security-services.sh
-                            curl -sS "http://127.0.0.1:${INGEST_PORT}/health"
+                            # Ingest must work even if Docker compose stack fails.
+                            scripts/ensure-ingest.sh
+                            scripts/ensure-security-services.sh || echo "WARN: full security stack start had issues; ingest is up"
+                            curl -sS "http://127.0.0.1:4200/health"
                             echo
-                            echo "Dashboard: http://127.0.0.1:${DASHBOARD_API_PORT:-4100}/ (admin/admin)"
+                            echo "Dashboard: http://127.0.0.1:${DASHBOARD_API_PORT}/ (admin/admin)"
                         '''
-                        logToPostgres('Start Services', 'SUCCESS', 'Security stack up with host Postgres access')
+                        logToPostgres('Start Services', 'SUCCESS', 'Ingest ready on 127.0.0.1:4200')
                     }
                 }
             }
@@ -479,12 +482,15 @@ pipeline {
                         ]) {
                             sh '''
                                 set -eu
-                                chmod +x scripts/publish-to-dashboard.sh scripts/ensure-security-services.sh
+                                chmod +x scripts/publish-to-dashboard.sh scripts/ensure-ingest.sh scripts/ensure-security-services.sh
                                 export JOB_NAME="${JOB_NAME}"
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
                                 export REPORTS_DIR="${REPORTS_DIR}"
                                 export INGEST_URL="http://127.0.0.1:4200/ingest/build"
                                 export JENKINS_DB_HOST="127.0.0.1"
+                                export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
+                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
+                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
                                 if [ -n "${BUILD_ID:-}" ]; then
                                   START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
                                   NOW_EPOCH="$(date +%s)"

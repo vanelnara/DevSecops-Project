@@ -2,15 +2,10 @@
 # Publish Jenkins scanner reports + build metadata to the security ingest bridge.
 set -euo pipefail
 
-export INGEST_URL="${INGEST_URL:-http://127.0.0.1:4200/ingest/build}"
-# Ignore stale Jenkins global overrides that point at unreachable LAN IPs.
-case "${INGEST_URL}" in
-  http://127.0.0.1:*|http://localhost:*) ;;
-  *)
-    echo "WARN: overriding INGEST_URL=${INGEST_URL} -> http://127.0.0.1:4200/ingest/build"
-    export INGEST_URL="http://127.0.0.1:4200/ingest/build"
-    ;;
-esac
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "${ROOT}"
+
+export INGEST_URL="http://127.0.0.1:${INGEST_PORT:-4200}/ingest/build"
 export INGEST_TOKEN="${INGEST_TOKEN:-}"
 export JOB_NAME="${JOB_NAME:-${1:-Devops-project}}"
 export BUILD_NUMBER="${BUILD_NUMBER:-${2:-0}}"
@@ -24,11 +19,20 @@ export DURATION_SECONDS="${DURATION_SECONDS:-}"
 export STARTED_AT="${STARTED_AT:-}"
 export FINISHED_AT="${FINISHED_AT:-}"
 export STAGES_JSON="${STAGES_JSON:-[]}"
+export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
+export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
+export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
+export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
 
 if [ "${BUILD_NUMBER}" = "0" ] || [ -z "${BUILD_NUMBER}" ]; then
   echo "BUILD_NUMBER is required"
   exit 1
 fi
+
+: "${JENKINS_DB_PASSWORD:?JENKINS_DB_PASSWORD is required}"
+
+chmod +x scripts/ensure-ingest.sh
+scripts/ensure-ingest.sh
 
 META_FILE="$(mktemp)"
 trap 'rm -f "${META_FILE}"' EXIT
@@ -76,31 +80,6 @@ if [ -n "${OWASP_JSON}" ] && [ -f "${OWASP_JSON}" ]; then
 fi
 
 echo "Publishing build ${JOB_NAME} #${BUILD_NUMBER} to ${INGEST_URL}"
-
-HEALTH_URL="$(echo "${INGEST_URL}" | sed -E 's#/ingest/build/?$##')/health"
-INGEST_HEALTH="$(curl --silent --show-error --max-time 5 "${HEALTH_URL}" || true)"
-echo "Preflight ${HEALTH_URL} => ${INGEST_HEALTH}"
-
-if ! echo "${INGEST_HEALTH}" | grep -q '"database":true'; then
-  echo "WARN: ingest not ready — attempting to start security services..."
-  if [ -x scripts/ensure-security-services.sh ]; then
-    # shellcheck disable=SC1091
-    scripts/ensure-security-services.sh || true
-    sleep 2
-    INGEST_HEALTH="$(curl --silent --show-error --max-time 5 "${HEALTH_URL}" || true)"
-    echo "Retry preflight ${HEALTH_URL} => ${INGEST_HEALTH}"
-  fi
-fi
-
-if ! echo "${INGEST_HEALTH}" | grep -q '"database":true'; then
-  echo "ERROR: ingest bridge is not reachable with PostgreSQL on ${HEALTH_URL}"
-  echo "On the Jenkins agent run:"
-  echo "  docker ps -a | grep -E 'ingest|4200'"
-  echo "  curl -s http://127.0.0.1:4200/health"
-  echo "  scripts/ensure-security-services.sh"
-  exit 1
-fi
-
 RESPONSE="$(curl "${CURL_ARGS[@]}")"
 echo "${RESPONSE}"
 echo "${RESPONSE}" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'
