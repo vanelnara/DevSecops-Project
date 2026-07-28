@@ -1,0 +1,62 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: DevSecOps pipeline
+    folder: DevSecOps
+    interval: 1m
+    rules:
+      - uid: jenkins_build_failed
+        title: Jenkins pipeline failed
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: max(jenkins_pipeline_failed{job="Devops-project"})
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 0s
+        annotations:
+          summary: Jenkins pipeline reported a failed build
+          description: Check Jenkins and the SentinelOps dashboard for the latest failed run.
+        labels:
+          severity: critical
+        isPaused: false
+
+      - uid: high_container_memory
+        title: High container memory usage
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                max(
+                  container_memory_working_set_bytes{name=~".+"}
+                  / ignoring(id)
+                  container_spec_memory_limit_bytes{name=~".+"}
+                ) > 0.9
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 2m
+        annotations:
+          summary: A container is near its memory limit
+          description: Investigate cAdvisor / Docker containers on the Jenkins host.
+        labels:
+          severity: warning
+        isPaused: false

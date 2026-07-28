@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Jenkins pipeline / custom metrics pushed after each build
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
+
+  # Container CPU / RAM / filesystem on the Docker host (Jenkins agent)
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Prometheus self-health
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Jenkins metrics (install Prometheus metrics plugin; exposes /prometheus)
+  # Replace host.docker.internal:8080 if Jenkins listens elsewhere.
+  - job_name: jenkins
+    metrics_path: /prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+
+  # Optional: Kubernetes node-exporter + kube-state-metrics (after k8s/monitoring/)
+  # Replace the IP with a worker/control-plane that exposes the NodePorts.
+  - job_name: k8s-node-exporter
+    static_configs:
+      - targets:
+          - "host.docker.internal:31000"
+        labels:
+          cluster: lab
+
+  - job_name: k8s-kube-state-metrics
+    static_configs:
+      - targets:
+          - "host.docker.internal:31080"
+        labels:
+          cluster: lab
