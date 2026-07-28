@@ -493,8 +493,12 @@ pipeline {
                                 export INGEST_URL="http://127.0.0.1:4200/ingest/build"
                                 export JENKINS_DB_HOST="127.0.0.1"
                                 export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
-                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
-                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
+                                if [ -z "${JENKINS_DB_NAME:-}" ] || [ "${JENKINS_DB_NAME}" = "${JENKINS_DB_PASSWORD:-}" ]; then
+                                  export JENKINS_DB_NAME="jenkins"
+                                fi
+                                if [ -z "${JENKINS_DB_USER:-}" ] || [ "${JENKINS_DB_USER}" = "${JENKINS_DB_PASSWORD:-}" ]; then
+                                  export JENKINS_DB_USER="jenkins"
+                                fi
                                 if [ -n "${BUILD_ID:-}" ]; then
                                   START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
                                   NOW_EPOCH="$(date +%s)"
@@ -529,9 +533,15 @@ pipeline {
                                 export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
                                 export JENKINS_DB_HOST="127.0.0.1"
                                 export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
-                                export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
-                                export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
-                                # Force a clean AI process so DB + HF env from this build are loaded
+                                # Use literal defaults (not the word that may equal the DB password),
+                                # otherwise Jenkins credential masking rewrites the script in the UI.
+                                if [ -z "${JENKINS_DB_NAME:-}" ] || [ "${JENKINS_DB_NAME}" = "${JENKINS_DB_PASSWORD:-}" ]; then
+                                  export JENKINS_DB_NAME="jenkins"
+                                fi
+                                if [ -z "${JENKINS_DB_USER:-}" ] || [ "${JENKINS_DB_USER}" = "${JENKINS_DB_PASSWORD:-}" ]; then
+                                  export JENKINS_DB_USER="jenkins"
+                                fi
+                                # Restart AI so this build loads the latest analyzer code + DB env
                                 if command -v fuser >/dev/null 2>&1; then
                                   fuser -k 4300/tcp >/dev/null 2>&1 || true
                                 fi

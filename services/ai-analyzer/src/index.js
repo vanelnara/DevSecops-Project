@@ -170,6 +170,11 @@ function extractJsonObject(text) {
   }
 }
 
+function safeInt(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
+}
+
 async function callModel(systemPrompt, userPrompt, messages = []) {
   const result = await callChatCompletion({ systemPrompt, userPrompt, messages });
   return result;
@@ -196,9 +201,9 @@ async function analyzeBuild(jobName, buildNumber) {
     const parsed = extractJsonObject(result.content);
     if (parsed?.verdict) {
       analysis = {
-        verdict: parsed.verdict,
-        confidence: Number(parsed.confidence || 85),
-        narrative: parsed.narrative || analysis.narrative,
+        verdict: String(parsed.verdict),
+        confidence: safeInt(parsed.confidence, 85),
+        narrative: parsed.narrative ? String(parsed.narrative) : analysis.narrative,
         priorities: Array.isArray(parsed.priorities) ? parsed.priorities : analysis.priorities,
         model: result.model,
         provider: result.provider,
@@ -208,6 +213,8 @@ async function analyzeBuild(jobName, buildNumber) {
   } catch (error) {
     console.warn(`AI analysis fallback: ${error.message}`);
   }
+
+  analysis.confidence = safeInt(analysis.confidence, 80);
 
   await pool.query(
     `INSERT INTO ai_analyses (job_name, build_number, verdict, confidence, narrative, priorities, model, raw_response)
@@ -222,7 +229,7 @@ async function analyzeBuild(jobName, buildNumber) {
        created_at = NOW()`,
     [
       jobName,
-      buildNumber,
+      safeInt(buildNumber, 0),
       analysis.verdict,
       analysis.confidence,
       analysis.narrative,
