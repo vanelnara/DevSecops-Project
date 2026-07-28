@@ -8,6 +8,7 @@ npm-debug.log*
 coverage/
 .nyc_output/
 .pgdata-local/
+.pgdata-local-5433/
 dependency-check-report/
 trivy-report/
 gitleaks-report/
@@ -20,3 +21,4 @@ vars/github-token
 ansible/inventory/hosts.yml
 ansible/group_vars/all.yml
 ansible/**/*.vault.yml
+monitoring/.env
