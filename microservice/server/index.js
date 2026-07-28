@@ -23,7 +23,7 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-app.use(cors());
+app.use(cors()); // Sonar may flag permissive CORS as a Security Hotspot — tighten origin in production
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

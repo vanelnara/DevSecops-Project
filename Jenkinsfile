@@ -55,17 +55,20 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 script {
-                    runLoggedStage('Unit Tests', 'Running npm test') {
+                    runLoggedStage('Unit Tests', 'Running npm test with coverage for SonarQube') {
                         dir('microservice') {
                             sh '''
                                 export PATH=/usr/bin:/usr/local/bin:$PATH
                                 node --version
                                 npm --version
                                 npm ci
-                                npm test
+                                npm run test:coverage
+                                test -f coverage/lcov.info
+                                echo "Coverage report ready: microservice/coverage/lcov.info"
+                                tail -n 5 coverage/lcov.info || true
                             '''
                         }
-                        logToPostgres('Unit Tests', 'SUCCESS', 'All unit tests passed')
+                        logToPostgres('Unit Tests', 'SUCCESS', 'Unit tests + LCOV coverage generated')
                     }
                 }
             }
@@ -107,10 +110,23 @@ pipeline {
                                       exit 2
                                     fi
 
+                                    if [ ! -f microservice/coverage/lcov.info ]; then
+                                      echo "WARN: microservice/coverage/lcov.info missing — generating coverage before Sonar scan"
+                                      (
+                                        cd microservice
+                                        npm ci
+                                        npm run test:coverage
+                                      )
+                                    fi
+
+                                    echo "Sonar sources scoped to app code (see sonar-project.properties)"
+                                    echo "LCOV lines: $(wc -l < microservice/coverage/lcov.info)"
+
                                     sonar-scanner \
                                       -Dsonar.token="${SONAR_TOKEN}" \
                                       -Dsonar.projectKey="${SONAR_PROJECT_KEY}" \
-                                      -Dproject.settings=sonar-project.properties
+                                      -Dproject.settings=sonar-project.properties \
+                                      -Dsonar.javascript.lcov.reportPaths=microservice/coverage/lcov.info
                                 '''
                             }
                         }
@@ -186,27 +202,35 @@ pipeline {
         stage('Secret Detection - Gitleaks') {
             steps {
                 script {
-                    runLoggedStage('Gitleaks', 'Scanning for secrets') {
+                    runLoggedStage('Gitleaks', 'Scanning working tree for secrets (not full git history)') {
                         def gitleaksExit = sh(
                             returnStatus: true,
                             script: '''
+                                set -eu
                                 mkdir -p reports/gitleaks
+                                # --no-git: scan current files only.
+                                # Historical leaks live in old commits; they are allowlisted in
+                                # security/gitleaks.toml and must be revoked in GitHub/DeepSeek UIs.
                                 gitleaks detect \
                                   --source . \
+                                  --no-git \
                                   --config security/gitleaks.toml \
                                   --report-path reports/gitleaks/report.json \
                                   --report-format json \
-                                  --exit-code 1
+                                  --exit-code 1 \
+                                  --verbose
                             '''
                         )
                         archiveArtifacts artifacts: 'reports/gitleaks/*.json', allowEmptyArchive: true
                         if (gitleaksExit == 1) {
-                            logToPostgres('Gitleaks', 'UNSTABLE', 'Potential secrets found; inspect the archived report')
-                            unstable('Gitleaks found potential secrets; inspect reports/gitleaks/report.json')
+                            echo 'Gitleaks found secrets in the current workspace — failing the stage.'
+                            sh 'echo "==== gitleaks report (head) ===="; head -c 4000 reports/gitleaks/report.json || true'
+                            logToPostgres('Gitleaks', 'FAILED', 'Secrets found in working tree')
+                            error('Gitleaks found potential secrets in the current workspace. Fix or allowlist, then re-run.')
                         } else if (gitleaksExit != 0) {
                             error("Gitleaks failed with exit code ${gitleaksExit}")
                         } else {
-                            logToPostgres('Gitleaks', 'SUCCESS', 'No secrets detected')
+                            logToPostgres('Gitleaks', 'SUCCESS', 'No secrets in working tree')
                         }
                     }
                 }

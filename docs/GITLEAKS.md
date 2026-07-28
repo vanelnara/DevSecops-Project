@@ -1,13 +1,20 @@
-# Gitleaks — known historical findings (rotated)
+# Gitleaks — known historical findings
 
-These fingerprints are allowlisted in `security/gitleaks.toml` so CI can stay green without rewriting published git history.
+Jenkins now runs:
 
-**You must still rotate/revoke the real secrets in the provider consoles:**
+```bash
+gitleaks detect --no-git --config security/gitleaks.toml ...
+```
 
-| Finding | Action |
-|---------|--------|
-| DeepSeek key formerly in `.env.example` | Revoke at DeepSeek dashboard (key is obsolete; project uses Hugging Face now) |
-| GitHub PAT formerly in `vars/github-token` | Revoke at https://github.com/settings/tokens and create a new one only in local `vars/github-token` (gitignored) |
-| Jenkinsfile `curl --user "${SONAR_TOKEN}:"` | False positive — current Jenkinsfile uses a non-matching form; fingerprint kept for old commits |
+That scans the **current workspace only**, so old commits no longer mark the build UNSTABLE.
 
-Never put live tokens in `.env.example` or commit `vars/github-token`.
+`security/gitleaks.toml` still allowlists those historical fingerprints/commits/secret strings as a safety net.
+
+## Revoke the leaked credentials (required)
+
+| Secret | Action |
+|--------|--------|
+| GitHub PAT `ghp_bQDF…` | https://github.com/settings/tokens → **revoke**, create a new token only in local gitignored `vars/github-token` |
+| DeepSeek `sk-94dd…` | Revoke in DeepSeek console (project uses Hugging Face now) |
+
+Never commit live tokens in `.env.example` or `vars/github-token`.

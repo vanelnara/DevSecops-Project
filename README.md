@@ -121,6 +121,7 @@ Agent-local services (always on the Jenkins node that runs the job):
 | **[docs/SECURITY_DASHBOARD_BACKEND.md](docs/SECURITY_DASHBOARD_BACKEND.md)** | Developers | Data plane (ingest → Postgres → AI → UI) |
 | **[docs/COSIGN.md](docs/COSIGN.md)** | Security | Cosign keypair and Jenkins secret IDs |
 | **[security-dashboard/README.md](security-dashboard/README.md)** | Frontend | Local dashboard API routes |
+| **[docs/SONARQUBE.md](docs/SONARQUBE.md)** | Sonar admins | Sources, LCOV coverage, why CE shows hotspots not CVE “Vulnerabilities” |
 | **[docs/GITLEAKS.md](docs/GITLEAKS.md)** | Security | Historical leak fingerprints + rotate checklist |
 | **[vars/credentials.yml.example](vars/credentials.yml.example)** | Checklist | Every secret you will paste into Jenkins (never commit real values) |
 
@@ -193,11 +194,12 @@ Artifacts under `reports/` are archived on every build.
 2. Login: **`admin` / `admin`** (change via `GRAFANA_ADMIN_PASSWORD` in `monitoring/.env`).  
 3. Left menu → **Dashboards** → folder **DevSecOps** → **DevSecOps overview**.  
 4. After a Jenkins build you should see **Latest build result** (`SUCCESS` / `FAILED` / `UNSTABLE`), build number, duration, risk, findings, trends, and container CPU/RAM.  
-5. If an old dashboard still says FAILED after a green build, clear legacy Pushgateway data once:
+5. If an old dashboard still says FAILED after a green build, refresh monitoring on the Jenkins host:
 
 ```bash
-curl -X DELETE http://127.0.0.1:9091/metrics/job/jenkins_pipeline || true
-docker compose -f monitoring/docker-compose.yml --env-file monitoring/.env up -d
+chmod +x scripts/refresh-monitoring.sh
+scripts/refresh-monitoring.sh
+# Then re-run the Jenkins job so Publish Metrics pushes the new metric names.
 ```
 
 Related UIs:

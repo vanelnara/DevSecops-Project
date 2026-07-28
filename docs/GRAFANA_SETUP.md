@@ -43,13 +43,12 @@ Dashboard folder **DevSecOps** → **DevSecOps overview**.
 
 The overview shows **latest build result** from a *replaceable* Pushgateway snapshot (`devsecops_jenkins_build_status`: `0=SUCCESS`, `1=FAILED`, `2=UNSTABLE`). Older failed builds no longer stick as “latest failed”.
 
-After upgrading metrics, clear legacy groups once on the Jenkins host:
+After upgrading metrics, clear legacy groups and recreate Grafana once on the Jenkins host:
 
 ```bash
-curl -X DELETE http://127.0.0.1:9091/metrics/job/jenkins_pipeline || true
-scripts/ensure-monitoring.sh
-# Re-run the Jenkins job (or) manually:
-#   JOB_NAME=Devops-project BUILD_NUMBER=<n> STATUS=SUCCESS scripts/publish-metrics-to-grafana.sh
+chmod +x scripts/refresh-monitoring.sh
+scripts/refresh-monitoring.sh
+# Re-run the Jenkins job so the Publish Metrics stage pushes `devsecops_jenkins_*` series.
 ```
 
 ### 1.2 Gmail App Password (email alerts)
