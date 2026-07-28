@@ -38,33 +38,16 @@ This README is written so someone who is **not** a DevOps specialist can clone t
 
 ## Architecture
 
-```text
- Developer ──git push──► GitHub (main)
-                            │
-                            ▼
-                     Jenkins pipeline
-         ┌──────────────┬──────────────┬──────────────┐
-         │ Unit tests   │ SonarQube    │ OWASP /      │
-         │              │              │ Gitleaks     │
-         └──────────────┴──────────────┴──────────────┘
-                            │
-              Docker Hub: sneproject/devsecops-{project,dashboard,ai}
-                            │
-              Trivy scan ──► Cosign sign
-                            │
-                            ▼
-              Argo CD ──► Kubernetes (ns: devsecops)
-                            │
-         ┌──────────────────┼──────────────────┐
-         │ NodePort 30081   │ NodePort 30410   │ NodePort 30430
-         │ Simple Shop      │ Dashboard        │ AI analyzer
-         └──────────────────┴──────────────────┘
+![DevSecOps Architecture](docs/images/devsecops-architecture.png)
 
- Jenkins agent (local services after deploy):
-   ingest :4200 ──► PostgreSQL (jenkins DB)
-   AI     :4300 ──► PostgreSQL + Hugging Face
-   dash   :4100 ──► PostgreSQL (+ AI for chat)
-```
+High-level flow (matches the diagram above):
+
+1. **DevSecOps engineer + Ansible** automate lab setup and push application / infra code to **GitHub**.
+2. **Jenkins CI** pulls the code, runs **OWASP** dependency checks, **SonarQube** quality analysis, **Docker** build, **Trivy** image scan, and **Cosign** signing, then pushes the signed image and stores logs in **PostgreSQL**.
+3. **Jenkins CD** updates the image version in GitHub; **Argo CD** pulls those manifests and deploys to **Kubernetes**.
+4. Deployment / pipeline logs go to **PostgreSQL**; the **AI analyzer** (Hugging Face in this lab) reads findings for analysis; the **React** SentinelOps dashboard (and optional Grafana) monitor results and can notify by email.
+
+In this repository the CI and CD steps live in a **single** `Jenkinsfile` (one job), and AI uses **Hugging Face** rather than OpenAI. The diagram still describes the intended architecture end to end.
 
 ---
 
@@ -103,6 +86,7 @@ Agent-local services (always on the Jenkins node that runs the job):
 ├── .env.example
 ├── ansible/                           ← infra provisioning guide + example playbooks
 ├── docs/                              ← detailed setup guides
+│   └── images/devsecops-architecture.png  ← architecture diagram (README)
 ├── db/migrations/                     ← SQL schema for dashboard / findings
 ├── k8s/                               ← Simple Shop + shared ConfigMap + Argo app
 │   ├── dashboard/                     ← SentinelOps dashboard K8s + Argo app
