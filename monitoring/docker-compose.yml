@@ -83,6 +83,8 @@ services:
       GF_SMTP_FROM_NAME: ${GF_SMTP_FROM_NAME:-DevSecOps Grafana}
       GF_SMTP_STARTTLS_POLICY: ${GF_SMTP_STARTTLS_POLICY:-OpportunisticStartTLS}
       GF_UNIFIED_ALERTING_ENABLED: "true"
+      GF_DATE_FORMATS_FULL_DATE: "YYYY-MM-DD HH:mm:ss"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/devsecops-overview.json
     ports:
       - "${GRAFANA_PORT:-3030}:3000"
     volumes:

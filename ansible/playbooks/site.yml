@@ -8,3 +8,6 @@
 
 - name: Include Postgres reminders
   ansible.builtin.import_playbook: 03-postgres.yml
+
+- name: Include Grafana / Prometheus monitoring stack
+  ansible.builtin.import_playbook: 04-grafana.yml

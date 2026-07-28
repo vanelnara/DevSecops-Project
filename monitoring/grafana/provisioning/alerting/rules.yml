@@ -7,7 +7,7 @@ groups:
     interval: 1m
     rules:
       - uid: jenkins_build_failed
-        title: Jenkins pipeline failed
+        title: Jenkins pipeline hard-failed
         condition: A
         data:
           - refId: A
@@ -16,23 +16,23 @@ groups:
               to: 0
             datasourceUid: prometheus
             model:
-              expr: max(jenkins_pipeline_failed{job="Devops-project"})
+              expr: max(devsecops_jenkins_build_failed{job_name="Devops-project"}) == 1
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
               refId: A
         noDataState: OK
         execErrState: OK
-        for: 0s
+        for: 1m
         annotations:
-          summary: Jenkins pipeline reported a failed build
-          description: Check Jenkins and the SentinelOps dashboard for the latest failed run.
+          summary: Latest Jenkins pipeline hard-failed
+          description: The replaceable latest metric reports failed=1. Check Jenkins console and SentinelOps for the current build.
         labels:
           severity: critical
         isPaused: false
 
-      - uid: high_container_memory
-        title: High container memory usage
+      - uid: high_container_cpu
+        title: High container CPU (cAdvisor)
         condition: A
         data:
           - refId: A
@@ -42,11 +42,62 @@ groups:
             datasourceUid: prometheus
             model:
               expr: |
-                max(
-                  container_memory_working_set_bytes{name=~".+"}
-                  / ignoring(id)
-                  container_spec_memory_limit_bytes{name=~".+"}
-                ) > 0.9
+                topk(1,
+                  sum by (name) (rate(container_cpu_usage_seconds_total{name=~".+"}[5m]))
+                ) > 1.5
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: A container is sustaining high CPU
+          description: Review cAdvisor / Docker on the Jenkins host.
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: high_container_memory
+        title: High container memory working set
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: |
+                max by (name) (
+                  container_memory_working_set_bytes{name=~"devsecops-.*|jenkins|sonarqube"}
+                ) > 2.5e9
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+        noDataState: OK
+        execErrState: OK
+        for: 5m
+        annotations:
+          summary: A lab container is using > ~2.5GiB RAM
+          description: Investigate memory growth on the Jenkins Docker host.
+        labels:
+          severity: warning
+        isPaused: false
+
+      - uid: monitoring_target_down
+        title: Critical scrape target down
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up{job=~"pushgateway|cadvisor|prometheus"} == 0
               instant: true
               intervalMs: 1000
               maxDataPoints: 43200
@@ -55,8 +106,8 @@ groups:
         execErrState: OK
         for: 2m
         annotations:
-          summary: A container is near its memory limit
-          description: Investigate cAdvisor / Docker containers on the Jenkins host.
+          summary: A core monitoring scrape target is down
+          description: Check docker compose for prometheus / pushgateway / cadvisor.
         labels:
-          severity: warning
+          severity: critical
         isPaused: false

@@ -182,6 +182,8 @@ ansible-playbook -i inventory/hosts.yml playbooks/site.yml
 
 After playbooks succeed, complete **manual** Jenkins UI work in [docs/JENKINS_SETUP.md](../docs/JENKINS_SETUP.md) (plugins, credentials, Sonar scanner installation name `sonarqube-server`).
 
+Grafana / Prometheus are started by `playbooks/04-grafana.yml` (also included from `site.yml`). Finish SMTP setup with [docs/GRAFANA_SETUP.md](../docs/GRAFANA_SETUP.md).
+
 ---
 
 ## 5. Manual procedure (no Ansible)

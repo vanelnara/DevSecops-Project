@@ -1,0 +1,58 @@
+---
+# Deploy Grafana + Prometheus + Pushgateway + cAdvisor on the Jenkins host
+- name: Monitoring stack (Grafana Labs)
+  hosts: jenkins
+  become: true
+  vars:
+    project_src: "{{ playbook_dir }}/../../"
+    monitoring_dest: /opt/devsecops-monitoring
+  tasks:
+    - name: Ensure Docker is available
+      ansible.builtin.command: docker --version
+      register: docker_ver
+      changed_when: false
+      failed_when: docker_ver.rc != 0
+
+    - name: Create monitoring install directory
+      ansible.builtin.file:
+        path: "{{ monitoring_dest }}"
+        state: directory
+        mode: "0755"
+
+    - name: Sync monitoring configs from this repository
+      ansible.builtin.copy:
+        src: "{{ project_src }}/monitoring/"
+        dest: "{{ monitoring_dest }}/"
+        mode: preserve
+
+    - name: Ensure env file exists
+      ansible.builtin.copy:
+        src: "{{ monitoring_dest }}/.env.example"
+        dest: "{{ monitoring_dest }}/.env"
+        remote_src: true
+        force: false
+        mode: "0600"
+
+    - name: Start Grafana / Prometheus / Pushgateway / cAdvisor
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.yml --env-file .env up -d
+        chdir: "{{ monitoring_dest }}"
+      register: compose_up
+      changed_when: "'Started' in compose_up.stdout or 'Creating' in compose_up.stdout or compose_up.rc == 0"
+
+    - name: Wait for Grafana health
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3030/api/health
+        status_code: 200
+      register: grafana_health
+      retries: 30
+      delay: 2
+      until: grafana_health.status == 200
+
+    - name: Remind operator about SMTP + K8s exporters
+      ansible.builtin.debug:
+        msg:
+          - "Grafana is up on http://{{ jenkins_public_ip | default(ansible_host) }}:3030"
+          - "Set GF_SMTP_PASSWORD in {{ monitoring_dest }}/.env for naravanel31@gmail.com alerts"
+          - "Optional K8s exporters: kubectl apply -k k8s/monitoring/"
+          - "Full guide: docs/GRAFANA_SETUP.md"
