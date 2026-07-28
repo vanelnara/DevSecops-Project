@@ -514,8 +514,9 @@ pipeline {
         stage('AI Security Analysis') {
             steps {
                 script {
-                    runLoggedStage('AI Analysis', 'Sending stored findings to Hugging Face AI analyzer') {
-                        withEnv(["AI_ANALYZER_URL=${env.AI_ANALYZER_URL}"]) {
+                    // Do not fail the whole pipeline on AI/HF blips — mark UNSTABLE and continue to Grafana.
+                    catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
+                        runLoggedStage('AI Analysis', 'Sending stored findings to Hugging Face AI analyzer') {
                             sh '''
                                 set -eu
                                 chmod +x scripts/trigger-ai-analysis.sh scripts/ensure-ai.sh
@@ -523,14 +524,53 @@ pipeline {
                                 export BUILD_NUMBER="${BUILD_NUMBER}"
                                 export AI_ANALYZER_URL="http://127.0.0.1:4300"
                                 export AI_PORT="4300"
+                                export AI_TIMEOUT_MS="${AI_TIMEOUT_MS:-60000}"
+                                export AI_PROVIDER="${AI_PROVIDER:-huggingface}"
+                                export HUGGINGFACE_MODEL="${HUGGINGFACE_MODEL:-Qwen/Qwen2.5-7B-Instruct:fastest}"
                                 export JENKINS_DB_HOST="127.0.0.1"
                                 export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
                                 export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
                                 export JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
+                                # Force a clean AI process so DB + HF env from this build are loaded
+                                if command -v fuser >/dev/null 2>&1; then
+                                  fuser -k 4300/tcp >/dev/null 2>&1 || true
+                                fi
+                                rm -f "${HOME}/.devsecops-services/pids/ai-analyzer.pid" || true
                                 scripts/trigger-ai-analysis.sh
                             '''
+                            logToPostgres('AI Analysis', 'SUCCESS', "AI analysis completed for build ${env.BUILD_NUMBER}")
                         }
-                        logToPostgres('AI Analysis', 'SUCCESS', "AI analysis completed for build ${env.BUILD_NUMBER}")
+                    }
+                }
+            }
+        }
+
+        stage('Publish Metrics to Grafana') {
+            steps {
+                script {
+                    runLoggedStage('Grafana Metrics', 'Pushing build/CPU/RAM monitoring metrics to Prometheus/Grafana') {
+                        sh '''
+                            set -eu
+                            chmod +x scripts/ensure-monitoring.sh scripts/publish-metrics-to-grafana.sh
+                            export PUSHGATEWAY_URL="${PUSHGATEWAY_URL:-http://127.0.0.1:9091}"
+                            export GRAFANA_URL="${GRAFANA_URL:-http://127.0.0.1:3030}"
+                            export GRAFANA_USER="${GRAFANA_USER:-admin}"
+                            export GRAFANA_PASSWORD="${GRAFANA_PASSWORD:-admin}"
+                            export JOB_NAME="${JOB_NAME}"
+                            export BUILD_NUMBER="${BUILD_NUMBER}"
+                            export STATUS="SUCCESS"
+                            export DURATION_SECONDS="${DURATION_SECONDS:-0}"
+                            if [ -n "${BUILD_ID:-}" ]; then
+                              START_EPOCH="$(date -d "$(echo "${BUILD_ID}" | tr '_' ' ' | tr '-' ':')" +%s 2>/dev/null || true)"
+                              NOW_EPOCH="$(date +%s)"
+                              if [ -n "${START_EPOCH:-}" ]; then
+                                export DURATION_SECONDS="$((NOW_EPOCH - START_EPOCH))"
+                              fi
+                            fi
+                            scripts/ensure-monitoring.sh
+                            scripts/publish-metrics-to-grafana.sh
+                        '''
+                        logToPostgres('Grafana Metrics', 'SUCCESS', "Published build ${env.BUILD_NUMBER} metrics to Grafana")
                     }
                 }
             }
@@ -542,6 +582,27 @@ pipeline {
             script {
                 logToPostgres('Pipeline', currentBuild.currentResult ?: 'UNKNOWN',
                     "Build ${env.BUILD_NUMBER} finished - ${currentBuild.currentResult}")
+                try {
+                    withEnv([
+                        "STATUS=${currentBuild.currentResult ?: 'UNKNOWN'}",
+                        "PUSHGATEWAY_URL=${env.PUSHGATEWAY_URL ?: 'http://127.0.0.1:9091'}",
+                        "GRAFANA_URL=${env.GRAFANA_URL ?: 'http://127.0.0.1:3030'}",
+                        "GRAFANA_USER=${env.GRAFANA_USER ?: 'admin'}",
+                        "GRAFANA_PASSWORD=${env.GRAFANA_PASSWORD ?: 'admin'}",
+                    ]) {
+                        sh '''
+                            set +e
+                            chmod +x scripts/ensure-monitoring.sh scripts/publish-metrics-to-grafana.sh
+                            scripts/ensure-monitoring.sh || true
+                            export JOB_NAME="${JOB_NAME}"
+                            export BUILD_NUMBER="${BUILD_NUMBER}"
+                            export STATUS="${STATUS}"
+                            scripts/publish-metrics-to-grafana.sh || echo "WARN: final metrics publish skipped"
+                        '''
+                    }
+                } catch (err) {
+                    echo "WARN: Grafana metrics publish in post skipped: ${err}"
+                }
             }
             archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
         }
@@ -549,7 +610,7 @@ pipeline {
             echo 'DevSecOps pipeline completed successfully.'
         }
         failure {
-            echo 'Pipeline failed - check stage logs and PostgreSQL pipeline_runs table.'
+            echo 'Pipeline failed - check stage logs, Grafana alerts, and PostgreSQL pipeline_runs table.'
         }
     }
 }

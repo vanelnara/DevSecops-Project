@@ -28,7 +28,8 @@ mkdir -p "${LOG_DIR}" "${PID_DIR}"
 healthy() {
   local body
   body="$(curl --silent --show-error --max-time 3 "${HEALTH_URL}" 2>/dev/null || true)"
-  echo "${body}" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"'
+  echo "${body}" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' \
+    && echo "${body}" | grep -q '"database"[[:space:]]*:[[:space:]]*true'
 }
 
 if healthy; then
@@ -80,7 +81,7 @@ nohup node src/index.js >>"${LOG_FILE}" 2>&1 &
 echo $! >"${PID_FILE}"
 echo "ai-analyzer pid $(cat "${PID_FILE}") — logs: ${LOG_FILE}"
 
-for i in $(seq 1 30); do
+for i in $(seq 1 60); do
   if healthy; then
     echo "AI analyzer is healthy:"
     curl --silent --show-error --max-time 3 "${HEALTH_URL}"
@@ -90,7 +91,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-echo "ERROR: ai-analyzer failed to become healthy on ${HEALTH_URL}"
+echo "ERROR: ai-analyzer failed to become healthy with database:true on ${HEALTH_URL}"
 echo "---- last 60 log lines ----"
 tail -n 60 "${LOG_FILE}" 2>/dev/null || true
 exit 1
