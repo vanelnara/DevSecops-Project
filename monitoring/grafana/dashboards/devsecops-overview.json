@@ -433,7 +433,7 @@
         },
         "overrides": []
       },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 15 },
+      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 15 },
       "id": 10,
       "options": {
         "colorMode": "background",
@@ -445,14 +445,59 @@
       },
       "targets": [
         {
-          "expr": "up{job=~\"pushgateway|cadvisor|prometheus|jenkins|k8s-node-exporter|k8s-kube-state-metrics\"}",
+          "expr": "up{job=~\"pushgateway|cadvisor|prometheus\"}",
           "legendFormat": "{{job}}",
           "instant": true,
           "refId": "A"
         }
       ],
-      "title": "Scrape targets",
+      "title": "Core scrape targets (must be UP)",
       "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Optional. Enable only after Jenkins /prometheus returns 200 and k8s exporters are applied.",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "options": {
+                "0": { "color": "orange", "text": "DOWN / OFF" },
+                "1": { "color": "green", "text": "UP" }
+              },
+              "type": "value"
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "orange", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 15 },
+      "id": 15,
+      "options": {
+        "colorMode": "background",
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "expr": "up{job=~\"jenkins|k8s-node-exporter|k8s-kube-state-metrics\"} or vector(0)",
+          "legendFormat": "optional scrapes (0 = not configured)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Optional scrapes (Jenkins / K8s)",
+      "type": "stat"
     },
     {
       "collapsed": false,

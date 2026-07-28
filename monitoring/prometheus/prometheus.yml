@@ -3,6 +3,10 @@ global:
   evaluation_interval: 15s
   scrape_timeout: 10s
 
+# CORE targets (always expected UP on the Jenkins Docker host).
+# Optional Jenkins + Kubernetes scrapes live in scrape-optional.yml —
+# enable them only after those endpoints respond (see docs/GRAFANA_SETUP.md).
+
 scrape_configs:
   - job_name: pushgateway
     honor_labels: true
@@ -24,29 +28,3 @@ scrape_configs:
       - targets: ["localhost:9090"]
         labels:
           component: monitoring
-
-  # Requires Jenkins "Prometheus metrics" plugin → /prometheus
-  - job_name: jenkins
-    metrics_path: /prometheus
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ["host.docker.internal:8080"]
-        labels:
-          component: ci
-
-  # After: kubectl apply -k k8s/monitoring/
-  - job_name: k8s-node-exporter
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ["host.docker.internal:31000"]
-        labels:
-          cluster: lab
-          component: node
-
-  - job_name: k8s-kube-state-metrics
-    scrape_timeout: 10s
-    static_configs:
-      - targets: ["host.docker.internal:31080"]
-        labels:
-          cluster: lab
-          component: kubernetes

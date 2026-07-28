@@ -23,10 +23,17 @@ docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" up -d --force-recre
 echo "Waiting for Grafana..."
 for i in $(seq 1 40); do
   if curl -sS --max-time 3 http://127.0.0.1:3030/api/health >/dev/null 2>&1; then
+    echo
+    echo "Core targets (expect UP): pushgateway, cadvisor, prometheus"
+    curl -sS http://127.0.0.1:9090/api/v1/targets 2>/dev/null \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); 
+[print(t['labels'].get('job'), t['health'], t.get('lastError','')) for t in d.get('data',{}).get('activeTargets',[])]" \
+      2>/dev/null || true
+    echo
     echo "Grafana OK → http://127.0.0.1:3030  (admin / see monitoring/.env)"
-    echo "Prometheus → http://127.0.0.1:9090"
-    echo "Pushgateway → http://127.0.0.1:9091"
-    echo "Open Dashboards → DevSecOps → DevSecOps overview"
+    echo "Prometheus → http://127.0.0.1:9090/targets"
+    echo "Pipeline panels use Pushgateway metrics (not Jenkins /prometheus)."
+    echo "Optional Jenkins/K8s scrapes: see docs/GRAFANA_SETUP.md § Optional scrapes"
     exit 0
   fi
   sleep 2

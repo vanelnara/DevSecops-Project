@@ -1,18 +1,20 @@
 # Grafana + Prometheus monitoring (manual + Ansible + Jenkins)
 
-This lab adds **Grafana Labs** monitoring on top of the existing DevSecOps pipeline:
+This lab adds **Grafana Labs** monitoring on top of the existing DevSecOps pipeline.
 
-| Component | Port | Role |
-|-----------|------|------|
-| **Grafana** | **3030** | Dashboards + email alerts |
-| **Prometheus** | **9090** | Metrics store / scrape |
-| **Pushgateway** | **9091** | Receives Jenkins build metrics after each pipeline |
-| **cAdvisor** | **8081** | Container CPU / RAM on the Jenkins Docker host |
-| **node-exporter** (K8s) | NodePort **31000** | Node CPU / RAM on cluster workers |
-| **kube-state-metrics** (K8s) | NodePort **31080** | Pod / deployment health |
+| Component | Port | Role | Required? |
+|-----------|------|------|-----------|
+| **Grafana** | **3030** | Dashboards + email alerts | Yes |
+| **Prometheus** | **9090** | Metrics store / scrape | Yes |
+| **Pushgateway** | **9091** | Receives Jenkins **pipeline** metrics after each build | Yes |
+| **cAdvisor** | **8081** | Container CPU / RAM on the Jenkins Docker host | Yes |
+| Jenkins `/prometheus` | **8080** | Extra Jenkins JVM/job metrics | Optional |
+| **node-exporter** (K8s) | NodePort **31000** | Node CPU / RAM | Optional |
+| **kube-state-metrics** (K8s) | NodePort **31080** | Pod / deployment health | Optional |
 
-# Optional: clear stale Pushgateway groups from the old metric scheme (one-time)
-# curl -X DELETE http://127.0.0.1:9091/metrics/job/jenkins_pipeline
+**Important:** Pipeline success panels in Grafana come from **Pushgateway** (stage *Publish Metrics to Grafana*), not from the Jenkins `/prometheus` scrape. If Jenkins/K8s targets are DOWN, the overview dashboard still works as long as **pushgateway + cadvisor + prometheus** are UP.
+
+Alert emails go to **`naravanel31@gmail.com`** (Grafana contact point `lab-email`).
 
 ---
 
@@ -29,7 +31,8 @@ cp monitoring/.env.example monitoring/.env
 #   GF_SMTP_PASSWORD=<Gmail App Password>   # required for email
 #   GRAFANA_ROOT_URL=http://192.168.10.149:3030
 
-docker compose -f monitoring/docker-compose.yml --env-file monitoring/.env up -d
+chmod +x scripts/refresh-monitoring.sh
+scripts/refresh-monitoring.sh
 
 curl -sS http://127.0.0.1:3030/api/health
 curl -sS http://127.0.0.1:9090/-/ready
@@ -41,15 +44,8 @@ Login: `admin` / value of `GRAFANA_ADMIN_PASSWORD` (default in example: `admin`)
 
 Dashboard folder **DevSecOps** → **DevSecOps overview**.
 
-The overview shows **latest build result** from a *replaceable* Pushgateway snapshot (`devsecops_jenkins_build_status`: `0=SUCCESS`, `1=FAILED`, `2=UNSTABLE`). Older failed builds no longer stick as “latest failed”.
-
-After upgrading metrics, clear legacy groups and recreate Grafana once on the Jenkins host:
-
-```bash
-chmod +x scripts/refresh-monitoring.sh
-scripts/refresh-monitoring.sh
-# Re-run the Jenkins job so the Publish Metrics stage pushes `devsecops_jenkins_*` series.
-```
+Check Prometheus targets: `http://<jenkins-ip>:9090/targets`  
+Expect **UP**: `pushgateway`, `cadvisor`, `prometheus`.
 
 ### 1.2 Gmail App Password (email alerts)
 
@@ -65,92 +61,94 @@ docker compose -f monitoring/docker-compose.yml --env-file monitoring/.env up -d
 5. In Grafana: **Alerting → Contact points → lab-email** should list `naravanel31@gmail.com`.  
 6. Send a test email from the contact point UI.
 
-### 1.3 Jenkins Prometheus plugin (optional but useful)
+---
 
-1. Jenkins → **Manage Jenkins → Plugins** → install **Prometheus metrics**.  
-2. Confirm `http://<jenkins-ip>:8080/prometheus` returns metrics.  
-3. Prometheus already scrapes `host.docker.internal:8080/prometheus` (see `monitoring/prometheus/prometheus.yml`).
+## 2. Optional scrapes (why you saw DOWN)
 
-### 1.4 Kubernetes exporters (CPU / RAM for cluster nodes & workloads)
+### 2.1 Jenkins `403 Forbidden` on `/prometheus`
+
+Prometheus connected to Jenkins, but Jenkins **refused anonymous access**.
+
+Fix on the Jenkins UI:
+
+1. **Manage Jenkins → Plugins** → install **Prometheus metrics** (if missing).  
+2. Open `http://127.0.0.1:8080/prometheus` in a browser on the Jenkins host.  
+   - If you must log in to see metrics, that is why Prometheus gets **403**.  
+3. **Manage Jenkins → Security** (Authorize users):
+   - Lab-simple: *Anyone can do anything* (lab only), **or**
+   - Grant **Anonymous** permission **Overall/Read** (and Metrics view if listed).  
+4. Confirm unauthenticated access:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/prometheus
+# expect 200
+```
+
+5. Enable the scrape: merge jobs from `monitoring/prometheus/scrape-optional.yml.example` into `monitoring/prometheus/prometheus.yml`, then:
+
+```bash
+scripts/refresh-monitoring.sh
+```
+
+### 2.2 Kubernetes exporters `connection refused` on `:31000` / `:31080`
+
+Those NodePorts are **not running** until you deploy them:
 
 ```bash
 kubectl apply -k k8s/monitoring/
 
-# Node CPU/RAM
-curl -sS http://<any-node-ip>:31000/metrics | head
-
-# Pod / deployment metrics
-curl -sS http://<any-node-ip>:31080/metrics | head
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:31000/metrics
+curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:31080/metrics
+# expect 200
 ```
 
-If the cluster is not on the same host as Docker Prometheus, edit `monitoring/prometheus/prometheus.yml` and replace `host.docker.internal:31000` / `:31080` with your real node IPs, then:
+Then enable the `k8s-*` jobs from `scrape-optional.yml.example` and refresh monitoring.
 
-```bash
-docker compose -f monitoring/docker-compose.yml --env-file monitoring/.env up -d prometheus
-curl -X POST http://127.0.0.1:9090/-/reload
-```
+Default `prometheus.yml` **does not** scrape Jenkins/K8s anymore, so Prometheus Status → Targets stays clean with 3/3 core UP.
 
 ---
 
-## 2. Ansible (infrastructure deploy)
-
-From the Ansible control node:
+## 3. Ansible
 
 ```bash
 cd ansible
-cp inventory/hosts.yml.example inventory/hosts.yml
-cp group_vars/all.yml.example group_vars/all.yml
-# set jenkins host IP
-
 ansible-playbook -i inventory/hosts.yml playbooks/04-grafana.yml
-# or include via site.yml
 ```
 
-The playbook copies `monitoring/` to the Jenkins host and starts the compose stack. You still must set `GF_SMTP_PASSWORD` on the host.
+Then finish SMTP + optional scrapes on the host (this doc §1–2).
 
 ---
 
-## 3. Jenkins pipeline integration
+## 4. Jenkins pipeline integration
 
 After **AI Security Analysis**, the job runs:
 
-1. `scripts/ensure-monitoring.sh` — starts Grafana/Prometheus/Pushgateway if needed  
-2. `scripts/publish-metrics-to-grafana.sh` — pushes:
+1. `scripts/ensure-monitoring.sh`  
+2. `scripts/publish-metrics-to-grafana.sh` → Pushgateway metrics:
+   - `devsecops_jenkins_build_number`  
+   - `devsecops_jenkins_build_status` (`0=SUCCESS`, `1=FAILED`, `2=UNSTABLE`)  
+   - duration / findings / risk  
 
-   - `jenkins_pipeline_build_number`  
-   - `jenkins_pipeline_failed`  
-   - `jenkins_pipeline_duration_seconds`  
-   - `jenkins_pipeline_findings_total`  
-   - `jenkins_pipeline_risk_score`  
-
-The **post { always }** block publishes again with the final build status (so failures still appear in Grafana).
-
-Optional Jenkins env / credentials:
-
-| Name | Purpose |
-|------|---------|
-| `GRAFANA_URL` | default `http://127.0.0.1:3030` |
-| `PUSHGATEWAY_URL` | default `http://127.0.0.1:9091` |
-| `GRAFANA_PASSWORD` | Grafana admin password (default `admin`) |
-| Secret text `grafana-smtp-password` | (manual) paste into `monitoring/.env` on the agent |
+`post { always }` republishes with the final build status.
 
 ---
 
-## 4. What you should see after a green build
+## 5. What you should see after a green build
 
-1. Grafana dashboard **DevSecOps overview** updates build number / duration.  
-2. cAdvisor panels show container CPU & memory.  
-3. A Grafana annotation marks the build.  
-4. If a later build fails, alert **Jenkins pipeline failed** emails **naravanel31@gmail.com**.
+1. Prometheus **Targets**: pushgateway, cadvisor, prometheus = **UP**  
+2. Grafana **DevSecOps overview**: latest build result + trends  
+3. cAdvisor panels: container CPU/memory  
+4. Optional: Jenkins/K8s targets UP only after §2  
 
 ---
 
-## 5. Troubleshooting
+## 6. Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| Metrics stage fails on Pushgateway | `docker compose -f monitoring/docker-compose.yml --env-file monitoring/.env up -d` |
-| No email | Set `GF_SMTP_PASSWORD` App Password; check Google blocks less-secure attempts |
-| Empty K8s panels | Apply `k8s/monitoring` and fix scrape IPs in `prometheus.yml` |
-| Jenkins scrape down | Install Prometheus plugin; open firewall to `:8080/prometheus` |
-| Port 3030 busy | Change `GRAFANA_PORT` in `monitoring/.env` |
+| Only cadvisor UP; jenkins/k8s red | Expected before optional setup — use core-only config (default now) |
+| Jenkins 403 | Allow anonymous read of `/prometheus` (§2.1) |
+| K8s connection refused | `kubectl apply -k k8s/monitoring/` (§2.2) |
+| Pipeline panels empty | Re-run job; confirm Pushgateway has metrics: `curl http://127.0.0.1:9091/metrics \| grep devsecops_jenkins` |
+| No email | Set `GF_SMTP_PASSWORD` App Password |
+| Stale FAILED badge | `scripts/refresh-monitoring.sh` then re-run pipeline |

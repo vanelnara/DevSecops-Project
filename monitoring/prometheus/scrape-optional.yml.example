@@ -1,0 +1,35 @@
+# OPTIONAL scrapes — copy into prometheus.yml (or merge) only when healthy.
+#
+# Test on the Jenkins host BEFORE enabling:
+#   curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/prometheus
+#   curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:31000/metrics
+#   curl -sS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:31080/metrics
+#
+# Expect HTTP 200. Then append these jobs under scrape_configs in prometheus.yml
+# and run: scripts/refresh-monitoring.sh
+
+  # --- Jenkins CI metrics (needs Prometheus metrics plugin + anonymous read) ---
+  - job_name: jenkins
+    metrics_path: /prometheus
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+        labels:
+          component: ci
+
+  # --- Kubernetes exporters (after: kubectl apply -k k8s/monitoring/) ---
+  - job_name: k8s-node-exporter
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["host.docker.internal:31000"]
+        labels:
+          cluster: lab
+          component: node
+
+  - job_name: k8s-kube-state-metrics
+    scrape_timeout: 10s
+    static_configs:
+      - targets: ["host.docker.internal:31080"]
+        labels:
+          cluster: lab
+          component: kubernetes
