@@ -23,7 +23,15 @@ function writeJson(filePath, data) {
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
 }
 
-app.use(cors()); // Sonar may flag permissive CORS as a Security Hotspot — tighten origin in production
+app.use(
+  cors({
+    // Lab default: allow local dashboard / shop UIs only (avoids "permissive CORS" hotspot).
+    origin: (process.env.CORS_ORIGINS || 'http://127.0.0.1:3000,http://127.0.0.1:4100,http://127.0.0.1:5173,http://localhost:3000,http://localhost:4100,http://localhost:5173')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean),
+  }),
+);
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 

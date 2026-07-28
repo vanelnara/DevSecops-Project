@@ -19,6 +19,8 @@ import {
   createSession,
   changeCredentials,
   createUser,
+  deleteChatMessage,
+  deleteChatMessages,
   destroySession,
   ensureDefaultAdmin,
   ensureUserSchema,
@@ -28,6 +30,7 @@ import {
   parseCookies,
   saveChatMessage,
   sessionCookie,
+  setForcedPassword,
   updateUserPreferences,
 } from './userRepository.js';
 
@@ -193,6 +196,21 @@ app.post('/api/auth/change-credentials', async (req, res) => {
   }
 });
 
+app.post('/api/auth/set-password', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    await bootstrapUserSchema();
+    const user = await setForcedPassword(
+      req.user.id,
+      req.body?.newPassword || req.body?.password,
+      req.body?.confirmNewPassword || req.body?.confirmPassword,
+    );
+    return res.json({ authenticated: true, user, message: 'Password saved' });
+  } catch (error) {
+    return res.status(400).json({ error: error.message || 'Failed to set password' });
+  }
+});
+
 app.get('/api/auth/activity', async (req, res) => {
   if (!requireUser(req, res)) return;
   try {
@@ -209,7 +227,7 @@ app.get('/api/auth/chat', async (req, res) => {
     const messages = await listChatMessages(req.user.id, {
       jobName: req.query.job || req.query.jobName,
       buildNumber: req.query.build || req.query.buildNumber,
-      limit: req.query.limit,
+      limit: req.query.limit || 80,
     });
     return res.json({
       messages: messages.map((row) => ({
@@ -224,6 +242,30 @@ app.get('/api/auth/chat', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Failed to load chat history' });
+  }
+});
+
+app.delete('/api/auth/chat/:id', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    const result = await deleteChatMessage(req.user.id, req.params.id);
+    return res.json(result);
+  } catch (error) {
+    return res.status(404).json({ error: error.message || 'Failed to delete chat message' });
+  }
+});
+
+app.delete('/api/auth/chat', async (req, res) => {
+  if (!requireUser(req, res)) return;
+  try {
+    const result = await deleteChatMessages(req.user.id, {
+      all: String(req.query.all || '') === '1' || req.body?.all === true,
+      jobName: req.query.job || req.query.jobName || req.body?.jobName,
+      buildNumber: req.query.build || req.query.buildNumber || req.body?.buildNumber,
+    });
+    return res.json(result);
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to clear chat history' });
   }
 });
 

@@ -26,6 +26,7 @@ function publicUser(row) {
     email: row.email,
     displayName: row.display_name,
     themePreference: row.theme_preference,
+    mustChangePassword: Boolean(row.must_change_password),
     createdAt: row.created_at,
   };
 }
@@ -101,6 +102,10 @@ export async function ensureUserSchema() {
       details    JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `);
+  await query(`
+    ALTER TABLE dashboard_users
+    ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE
   `);
 }
 
@@ -200,12 +205,25 @@ export async function getUserBySession(token) {
 export async function ensureDefaultAdmin() {
   await ensureUserSchema();
   const existing = await query(`SELECT * FROM dashboard_users WHERE username = 'admin' LIMIT 1`);
-  if (existing.rows[0]) return publicUser(existing.rows[0]);
+  if (existing.rows[0]) {
+    const row = existing.rows[0];
+    // Keep forcing a password reset while the lab default password is still in use.
+    if (verifyPassword('admin', row.password_hash) && !row.must_change_password) {
+      await query(
+        `UPDATE dashboard_users SET must_change_password = TRUE, updated_at = NOW() WHERE id = $1`,
+        [row.id],
+      );
+      row.must_change_password = true;
+    }
+    return publicUser(row);
+  }
 
   const passwordHash = hashPassword('admin');
   const result = await query(
-    `INSERT INTO dashboard_users (username, email, password_hash, display_name, theme_preference)
-     VALUES ('admin', 'admin@sentinelops.local', $1, 'Administrator', 'system')
+    `INSERT INTO dashboard_users (
+       username, email, password_hash, display_name, theme_preference, must_change_password
+     )
+     VALUES ('admin', 'admin@sentinelops.local', $1, 'Administrator', 'system', TRUE)
      ON CONFLICT (username) DO NOTHING
      RETURNING *`,
     [passwordHash],
@@ -215,6 +233,42 @@ export async function ensureDefaultAdmin() {
     return publicUser(result.rows[0]);
   }
   return null;
+}
+
+/** First-login password set (keeps username). */
+export async function setForcedPassword(userId, newPassword, confirmNewPassword) {
+  const current = await query(`SELECT * FROM dashboard_users WHERE id = $1`, [userId]);
+  const row = current.rows[0];
+  if (!row) throw new Error('User not found');
+  if (!row.must_change_password) {
+    throw new Error('Password change is not required for this account');
+  }
+  const nextPassword = String(newPassword || '');
+  const confirmPassword = String(confirmNewPassword || '');
+  if (!nextPassword || !confirmPassword) {
+    throw new Error('Enter the new password twice');
+  }
+  if (nextPassword !== confirmPassword) {
+    throw new Error('New password fields do not match');
+  }
+  if (nextPassword.length < 5) {
+    throw new Error('New password must be at least 5 characters');
+  }
+  if (nextPassword === 'admin') {
+    throw new Error('Choose a password other than the default admin password');
+  }
+  const passwordHash = hashPassword(nextPassword);
+  const result = await query(
+    `UPDATE dashboard_users
+     SET password_hash = $1,
+         must_change_password = FALSE,
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [passwordHash, userId],
+  );
+  await recordActivity(userId, 'user.password_set', { forced: true });
+  return publicUser(result.rows[0]);
 }
 
 export async function changeCredentials(userId, {
@@ -266,6 +320,7 @@ export async function changeCredentials(userId, {
       `UPDATE dashboard_users
        SET username = $1,
            password_hash = $2,
+           must_change_password = FALSE,
            display_name = CASE
              WHEN lower(display_name) IN (lower($3), 'administrator') THEN $1
              ELSE display_name
@@ -374,6 +429,33 @@ export async function listChatMessages(userId, { jobName, buildNumber, limit = 5
   sql += ` ORDER BY created_at DESC LIMIT $${params.length}`;
   const result = await query(sql, params);
   return result.rows.reverse();
+}
+
+export async function deleteChatMessage(userId, messageId) {
+  const result = await query(
+    `DELETE FROM user_chat_messages
+     WHERE id = $1 AND user_id = $2
+     RETURNING id`,
+    [Number(messageId), userId],
+  );
+  if (!result.rows[0]) throw new Error('Chat message not found');
+  return { deleted: true, id: result.rows[0].id };
+}
+
+export async function deleteChatMessages(userId, { jobName, buildNumber, all = false } = {}) {
+  const params = [userId];
+  let sql = `DELETE FROM user_chat_messages WHERE user_id = $1`;
+  if (!all && jobName) {
+    params.push(jobName);
+    sql += ` AND job_name = $${params.length}`;
+  }
+  if (!all && buildNumber) {
+    params.push(Number(buildNumber));
+    sql += ` AND build_number = $${params.length}`;
+  }
+  sql += ` RETURNING id`;
+  const result = await query(sql, params);
+  return { deleted: result.rowCount || 0 };
 }
 
 export async function listUserActivity(userId, limit = 30) {

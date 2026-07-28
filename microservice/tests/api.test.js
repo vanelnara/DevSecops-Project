@@ -55,9 +55,24 @@ describe('simple-shop HTTP API', () => {
     assert.ok(Array.isArray(res.body));
   });
 
+  it('GET /api/products supports search query', async () => {
+    const res = await request(app).get('/api/products').query({ search: 'a' });
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body));
+  });
+
   it('GET /api/products/:id 404 for missing product', async () => {
     const res = await request(app).get('/api/products/999999');
     assert.equal(res.status, 404);
+  });
+
+  it('GET /api/products/:id returns a product when present', async () => {
+    const list = await request(app).get('/api/products');
+    assert.ok(list.body.length > 0);
+    const id = list.body[0].id;
+    const res = await request(app).get(`/api/products/${id}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.id, id);
   });
 
   it('POST /api/orders rejects empty cart', async () => {
@@ -72,5 +87,35 @@ describe('simple-shop HTTP API', () => {
       .post('/api/orders')
       .send({ items: [{ id: 1, quantity: 1 }], customer: { name: 'A' } });
     assert.equal(res.status, 400);
+  });
+
+  it('POST /api/orders rejects unknown product id', async () => {
+    const res = await request(app)
+      .post('/api/orders')
+      .send({
+        items: [{ id: 999999, quantity: 1 }],
+        customer: { name: 'A', email: 'a@b.c', address: 'street 1' },
+      });
+    assert.equal(res.status, 400);
+  });
+
+  it('POST /api/orders creates an order for a valid product', async () => {
+    const list = await request(app).get('/api/products');
+    const product = list.body[0];
+    const res = await request(app)
+      .post('/api/orders')
+      .send({
+        items: [{ id: product.id, quantity: 2 }],
+        customer: { name: 'Ada', email: 'ada@example.com', address: '12 Lab St' },
+      });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.status, 'confirmed');
+    assert.ok(res.body.total > 0);
+  });
+
+  it('GET /api/orders returns an array', async () => {
+    const res = await request(app).get('/api/orders');
+    assert.equal(res.status, 200);
+    assert.ok(Array.isArray(res.body));
   });
 });

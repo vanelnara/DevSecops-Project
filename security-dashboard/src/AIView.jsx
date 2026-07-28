@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   ChevronRight,
   Clock3,
   Database,
   GitBranch,
+  History,
   Radio,
   Send,
   ShieldCheck,
   Sparkles,
+  Trash2,
   WifiOff,
 } from 'lucide-react';
 
@@ -58,10 +60,12 @@ export default function AIView({
 }) {
   const [question, setQuestion] = useState('');
   const [messages, setMessages] = useState([]);
+  const [history, setHistory] = useState([]);
   const [sending, setSending] = useState(false);
   const [suggestions, setSuggestions] = useState(DEFAULT_SUGGESTIONS);
   const [agentStatus, setAgentStatus] = useState({ online: false, loading: true });
   const [analyzeMessage, setAnalyzeMessage] = useState('');
+  const [historyBusy, setHistoryBusy] = useState(false);
 
   const selectedBuild = data?.selectedBuild || null;
   const analysis = data?.aiAnalysis || null;
@@ -87,11 +91,30 @@ export default function AIView({
     }
   }
 
+  async function loadHistory() {
+    if (!user) {
+      setHistory([]);
+      return;
+    }
+    try {
+      const response = await fetch('/api/auth/chat?limit=80', { credentials: 'include' });
+      const payload = await response.json();
+      if (!response.ok) return;
+      setHistory(payload.messages || []);
+    } catch {
+      /* keep existing history */
+    }
+  }
+
   useEffect(() => {
     loadAgentStatus();
     const timer = setInterval(loadAgentStatus, 12000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [user?.id]);
 
   useEffect(() => {
     const agentName = agentStatus.agent?.name || 'SentinelOps Security Copilot';
@@ -131,6 +154,7 @@ export default function AIView({
       .then((payload) => {
         if (cancelled || !payload.messages?.length) return;
         setMessages(payload.messages.map((row) => ({
+          id: row.id,
           role: row.role,
           content: row.content,
           citations: row.meta?.citations,
@@ -148,6 +172,64 @@ export default function AIView({
     agentStatus.agent?.name,
     user?.id,
   ]);
+
+  const historyPairs = useMemo(() => {
+    const pairs = [];
+    for (let i = 0; i < history.length; i += 1) {
+      const row = history[i];
+      if (row.role === 'user') {
+        const answer = history[i + 1]?.role === 'assistant' ? history[i + 1] : null;
+        pairs.push({
+          id: row.id,
+          question: row.content,
+          answer: answer?.content || '',
+          answerId: answer?.id,
+          createdAt: row.createdAt,
+          jobName: row.jobName,
+          buildNumber: row.buildNumber,
+        });
+        if (answer) i += 1;
+      } else if (row.role === 'assistant' && row.meta?.remediation) {
+        pairs.push({
+          id: row.id,
+          question: 'AI remediation',
+          answer: row.content,
+          answerId: row.id,
+          createdAt: row.createdAt,
+          jobName: row.jobName,
+          buildNumber: row.buildNumber,
+        });
+      }
+    }
+    return pairs.slice().reverse();
+  }, [history]);
+
+  async function deleteHistoryItem(pair) {
+    if (!pair?.id || historyBusy) return;
+    setHistoryBusy(true);
+    try {
+      const ids = [pair.id, pair.answerId].filter(Boolean);
+      for (const id of ids) {
+        await fetch(`/api/auth/chat/${id}`, { method: 'DELETE', credentials: 'include' });
+      }
+      await loadHistory();
+      setMessages((current) => current.filter((m) => !ids.includes(m.id)));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  async function clearHistory() {
+    if (historyBusy) return;
+    setHistoryBusy(true);
+    try {
+      await fetch('/api/auth/chat?all=1', { method: 'DELETE', credentials: 'include' });
+      setHistory([]);
+      setMessages((current) => current.filter((m) => m.role === 'assistant').slice(0, 1));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
 
   async function ask(nextQuestion) {
     if (!nextQuestion.trim() || sending) return;
@@ -203,6 +285,7 @@ export default function AIView({
       if (result.pipelineAvailable && !hasLive && onRefresh) {
         onRefresh();
       }
+      loadHistory();
     } catch (error) {
       setMessages((current) => [...current, { role: 'assistant', content: error.message }]);
     } finally {
@@ -504,9 +587,65 @@ export default function AIView({
             </div>
           </div>
 
+          <div className="ai-history-panel">
+            <div className="ai-history-heading">
+              <History size={14} />
+              <strong>Conversation history</strong>
+              <button
+                type="button"
+                className="text-button"
+                disabled={historyBusy || !historyPairs.length}
+                onClick={clearHistory}
+              >
+                Clear all
+              </button>
+            </div>
+            {!historyPairs.length ? (
+              <p className="ai-history-empty">Questions and AI remediations you ask are stored here.</p>
+            ) : (
+              <div className="ai-history-list">
+                {historyPairs.map((pair) => (
+                  <article key={pair.id} className="ai-history-item">
+                    <header>
+                      <strong>{pair.question.slice(0, 90)}{pair.question.length > 90 ? '…' : ''}</strong>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label="Delete history item"
+                        disabled={historyBusy}
+                        onClick={() => deleteHistoryItem(pair)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </header>
+                    {pair.answer ? (
+                      <p>{pair.answer.slice(0, 160)}{pair.answer.length > 160 ? '…' : ''}</p>
+                    ) : null}
+                    <small>
+                      {pair.jobName ? `${pair.jobName} #${pair.buildNumber || '—'}` : 'General chat'}
+                      {pair.createdAt ? ` · ${new Date(pair.createdAt).toLocaleString()}` : ''}
+                    </small>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => {
+                        setMessages([
+                          { role: 'user', content: pair.question, id: pair.id },
+                          ...(pair.answer ? [{ role: 'assistant', content: pair.answer, id: pair.answerId }] : []),
+                        ]);
+                      }}
+                    >
+                      Open in chat <ChevronRight size={14} />
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="ai-chat-stream">
             {messages.map((message, index) => (
-              <div className={classNames('ai-bubble', message.role)} key={`${message.role}-${index}`}>
+              <div className={classNames('ai-bubble', message.role)} key={`${message.role}-${message.id || index}`}>
                 {message.role === 'assistant' ? <Bot size={14} /> : null}
                 <div>
                   <p>{message.content}</p>

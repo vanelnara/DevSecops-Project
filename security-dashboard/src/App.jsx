@@ -36,12 +36,12 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -52,6 +52,7 @@ import {
 import AIView from './AIView.jsx';
 import LoginPage from './LoginPage.jsx';
 import SettingsView from './SettingsView.jsx';
+import SentinelOpsLogo from './SentinelOpsLogo.jsx';
 
 const VIEWS = {
   overview: 'Security overview',
@@ -155,7 +156,7 @@ function Sidebar({ open, onClose, view, onNavigate, counts, user }) {
       <aside className={classNames('sidebar', open && 'sidebar-open')}>
         <div className="brand">
           <div className="brand-mark">
-            <img src="/sentinelops-logo.png" alt="" width={36} height={36} />
+            <SentinelOpsLogo size={36} />
           </div>
           <div>
             <strong>SentinelOps</strong>
@@ -332,16 +333,22 @@ function Header({
   );
 }
 
-function MetricCard({ label, value, detail, icon: Icon, tone }) {
+function MetricCard({ label, value, detail, icon: Icon, tone, onClick }) {
+  const Tag = onClick ? 'button' : 'article';
   return (
-    <article className="metric-card">
+    <Tag
+      type={onClick ? 'button' : undefined}
+      className={classNames('metric-card', onClick && 'metric-card-clickable')}
+      onClick={onClick}
+    >
       <div className={classNames('metric-icon', tone)}><Icon size={19} /></div>
       <div className="metric-copy">
         <span>{label}</span>
         <div className="metric-value">{value}</div>
         <small>{detail}</small>
       </div>
-    </article>
+      {onClick ? <ChevronRight className="metric-card-chevron" size={16} /> : null}
+    </Tag>
   );
 }
 
@@ -375,13 +382,51 @@ function DetailDrawer({ title, onClose, children }) {
   );
 }
 
-function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipelines }) {
+function OverviewView({
+  data,
+  onOpenBuild,
+  onOpenFinding,
+  onGoFindings,
+  onGoPipelines,
+  onGoPipelinesSuccess,
+}) {
   const hasLive = data.dataMode === 'postgres' && data.selectedBuild;
   const total = data.severity.reduce((sum, item) => sum + item.value, 0);
   const delta = data.summary.riskDelta || 0;
   const chartSeverity = total > 0
     ? data.severity
     : data.severity.map((item) => ({ ...item, value: item.value || 0.0001 }));
+  const trendMax = Math.max(
+    4,
+    ...((data.trend || []).flatMap((row) => [row.critical, row.high, row.medium, row.total || 0])),
+  );
+
+  function openSelectedOrPipelines() {
+    if (data.selectedBuild) {
+      onOpenBuild(data.selectedBuild.jobName, data.selectedBuild.buildNumber);
+      return;
+    }
+    onGoPipelines();
+  }
+
+  function openControl(control) {
+    if (data.selectedBuild) {
+      onOpenBuild(data.selectedBuild.jobName, data.selectedBuild.buildNumber, {
+        stage: control.stage,
+        source: control.sourceKey || control.tool,
+      });
+      return;
+    }
+    onGoPipelines();
+  }
+
+  function openStage(stageName) {
+    if (data.selectedBuild) {
+      onOpenBuild(data.selectedBuild.jobName, data.selectedBuild.buildNumber, { stage: stageName });
+      return;
+    }
+    onGoPipelines();
+  }
 
   return (
     <main className="dashboard">
@@ -434,6 +479,7 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
           detail={`${data.summary.high} high · ${data.summary.totalFindings} total open`}
           icon={ShieldAlert}
           tone="red"
+          onClick={onGoFindings}
         />
         <MetricCard
           label="Unstable / failed builds"
@@ -441,6 +487,7 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
           detail={`Across ${data.summary.totalBuilds} ingested builds`}
           icon={SquareTerminal}
           tone="purple"
+          onClick={onGoPipelines}
         />
         <MetricCard
           label="Control coverage"
@@ -448,13 +495,15 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
           detail="Derived from scanner findings on this build"
           icon={ShieldCheck}
           tone="blue"
+          onClick={openSelectedOrPipelines}
         />
         <MetricCard
-          label="Avg build duration"
-          value={data.summary.meanTimeToResolve}
-          detail="Average of ingested pipeline durations"
-          icon={Clock3}
+          label="Successful builds"
+          value={data.summary.successfulBuilds ?? 0}
+          detail="Click to open successful pipelines"
+          icon={Check}
           tone="green"
+          onClick={onGoPipelinesSuccess}
         />
       </section>
 
@@ -484,22 +533,28 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
           </div>
         </Panel>
 
-        <Panel className="trend-panel" title="Finding trend" subtitle="Last 7 days of ingested builds" action={<span className="positive-delta"><TrendingDown size={14} /> {hasLive ? 'live' : 'ready'}</span>}>
+        <Panel className="trend-panel" title="Finding trend" subtitle="Critical / high / medium over recent builds" action={<span className="positive-delta"><TrendingDown size={14} /> {hasLive ? 'live' : 'ready'}</span>}>
           <div className="chart-legend">
             <span><i className="legend-critical" /> Critical</span>
             <span><i className="legend-high" /> High</span>
             <span><i className="legend-medium" /> Medium</span>
           </div>
           <ResponsiveContainer width="100%" height={225}>
-            <AreaChart data={data.trend} margin={{ top: 12, right: 8, left: -24, bottom: 0 }}>
+            <LineChart data={data.trend} margin={{ top: 12, right: 12, left: -8, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 5" vertical={false} stroke="var(--chart-grid)" />
               <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} />
-              <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--muted)', fontSize: 12 }} allowDecimals={false} />
+              <YAxis
+                axisLine={false}
+                tickLine={false}
+                tick={{ fill: 'var(--muted)', fontSize: 12 }}
+                allowDecimals={false}
+                domain={[0, trendMax]}
+              />
               <Tooltip content={<ChartTooltip />} />
-              <Area type="monotone" dataKey="medium" name="Medium" stroke="#eab308" strokeWidth={2} fill="transparent" />
-              <Area type="monotone" dataKey="high" name="High" stroke="#f97316" strokeWidth={2} fill="transparent" />
-              <Area type="monotone" dataKey="critical" name="Critical" stroke="#ef4444" strokeWidth={2} fill="transparent" />
-            </AreaChart>
+              <Line type="monotone" dataKey="medium" name="Medium" stroke="#eab308" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="high" name="High" stroke="#f97316" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+              <Line type="monotone" dataKey="critical" name="Critical" stroke="#ef4444" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+            </LineChart>
           </ResponsiveContainer>
         </Panel>
       </section>
@@ -615,33 +670,56 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
       </section>
 
       <section className="lower-grid">
-        <Panel title="Control coverage" subtitle="Derived from scanner sources">
+        <Panel title="Control coverage" subtitle="Click a control to open its pipeline stage">
           <div className="control-list">
             {data.controls.map((control) => (
-              <div className="control-row" key={control.name}>
+              <button
+                type="button"
+                className="control-row control-row-btn"
+                key={control.name}
+                onClick={() => openControl(control)}
+              >
                 <div className={classNames('control-state', control.status)}>
                   {control.status === 'passing' ? <Check size={15} /> : <AlertTriangle size={15} />}
                 </div>
                 <div className="control-copy">
-                  <div><strong>{control.name}</strong><span>{control.tool}</span></div>
+                  <div>
+                    <strong>{control.name}</strong>
+                    <span>{control.tool} · {control.stage || 'stage'}</span>
+                  </div>
                   <div className="coverage-track"><i style={{ width: `${control.coverage}%` }} /></div>
                 </div>
                 <strong>{control.coverage}%</strong>
-              </div>
+                <ChevronRight size={16} className="control-row-chevron" />
+              </button>
             ))}
           </div>
         </Panel>
 
-        <Panel title="Stage performance" subtitle="Durations from pipeline_stages">
-          <ResponsiveContainer width="100%" height={250}>
+        <Panel title="Stage performance" subtitle="Click a stage to open that pipeline step">
+          <ResponsiveContainer width="100%" height={180}>
             <BarChart data={data.pipelinePerformance} layout="vertical" margin={{ left: 10, right: 8 }}>
               <CartesianGrid horizontal={false} stroke="var(--chart-grid)" />
               <XAxis type="number" hide />
-              <YAxis type="category" dataKey="stage" axisLine={false} tickLine={false} width={90} tick={{ fill: 'var(--muted)', fontSize: 11 }} />
+              <YAxis type="category" dataKey="stage" axisLine={false} tickLine={false} width={100} tick={{ fill: 'var(--muted)', fontSize: 13 }} />
               <Tooltip content={<ChartTooltip />} />
-              <Bar dataKey="duration" name="Duration (s)" fill="#38bdf8" radius={[0, 4, 4, 0]} barSize={8} />
+              <Bar dataKey="duration" name="Duration (s)" fill="#38bdf8" radius={[0, 4, 4, 0]} barSize={10} />
             </BarChart>
           </ResponsiveContainer>
+          <div className="stage-link-list">
+            {(data.pipelinePerformance || []).map((stage) => (
+              <button
+                type="button"
+                key={stage.stage}
+                className="stage-link-btn"
+                onClick={() => openStage(stage.stage)}
+              >
+                <strong>{stage.stage}</strong>
+                <span>{stage.duration || 0}s · {stage.status || '—'}</span>
+                <ChevronRight size={14} />
+              </button>
+            ))}
+          </div>
         </Panel>
 
         <Panel title="Live activity" subtitle="Events written by ingest and AI">
@@ -669,7 +747,10 @@ function OverviewView({ data, onOpenBuild, onOpenFinding, onGoFindings, onGoPipe
 
 function PipelinesView({ builds, statusFilter, onStatusFilter, search, onOpenBuild, loading }) {
   const filtered = builds.filter((build) => {
-    const matchesStatus = statusFilter === 'all' || build.status === statusFilter;
+    const status = String(build.status || '').toLowerCase();
+    const matchesStatus = statusFilter === 'all'
+      || status === statusFilter
+      || (statusFilter === 'success' && ['success', 'successful', 'passed'].includes(status));
     const q = search.trim().toLowerCase();
     const matchesSearch = !q
       || build.name.toLowerCase().includes(q)
@@ -844,6 +925,7 @@ export default function App() {
   const [findingStatusFilter, setFindingStatusFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [selectedBuildDetail, setSelectedBuildDetail] = useState(null);
+  const [buildFocus, setBuildFocus] = useState(null);
   const [selectedFinding, setSelectedFinding] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [user, setUser] = useState(null);
@@ -903,7 +985,7 @@ export default function App() {
         waitingReason: loadError.message,
         summary: {
           riskScore: 0, riskDelta: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0,
-          blockedBuilds: 0, meanTimeToResolve: '—', coverage: 0, totalBuilds: 0,
+          blockedBuilds: 0, successfulBuilds: 0, meanTimeToResolve: '—', coverage: 0, totalBuilds: 0,
         },
         severity: [
           { name: 'Critical', value: 0, color: '#ef4444' },
@@ -1012,13 +1094,14 @@ export default function App() {
     await loadDashboard(jobName, buildNumber);
   }
 
-  async function openBuild(jobName, buildNumber) {
+  async function openBuild(jobName, buildNumber, focus = null) {
     const response = await fetch(`/api/builds/${encodeURIComponent(jobName)}/${buildNumber}`);
     const detail = await response.json();
     if (!response.ok) {
       setError(detail.error || 'Failed to load build');
       return;
     }
+    setBuildFocus(focus);
     setSelectedBuildDetail(detail);
     await loadDashboard(jobName, buildNumber);
   }
@@ -1082,6 +1165,17 @@ export default function App() {
     );
   }
 
+  if (user.mustChangePassword) {
+    return (
+      <LoginPage
+        onAuthenticated={handleAuthenticated}
+        resolvedTheme={resolvedTheme}
+        forcePassword
+        user={user}
+      />
+    );
+  }
+
   if (!data) return <LoadingState />;
 
   return (
@@ -1129,7 +1223,14 @@ export default function App() {
             onOpenBuild={openBuild}
             onOpenFinding={setSelectedFinding}
             onGoFindings={() => setView('findings')}
-            onGoPipelines={() => setView('pipelines')}
+            onGoPipelines={() => {
+              setBuildStatusFilter('all');
+              setView('pipelines');
+            }}
+            onGoPipelinesSuccess={() => {
+              setBuildStatusFilter('success');
+              setView('pipelines');
+            }}
           />
         )}
         {view === 'pipelines' && (
@@ -1197,7 +1298,10 @@ export default function App() {
       {selectedBuildDetail && (
         <DetailDrawer
           title={`${selectedBuildDetail.build.name} #${selectedBuildDetail.build.id}`}
-          onClose={() => setSelectedBuildDetail(null)}
+          onClose={() => {
+            setSelectedBuildDetail(null);
+            setBuildFocus(null);
+          }}
         >
           <div className="drawer-meta">
             <StatusPill status={selectedBuildDetail.build.status} />
@@ -1205,30 +1309,48 @@ export default function App() {
             <span>{selectedBuildDetail.build.duration}</span>
             <span>{selectedBuildDetail.build.finishedAt}</span>
           </div>
+          {buildFocus?.stage || buildFocus?.source ? (
+            <p className="drawer-focus-note">
+              Focused on {buildFocus.stage ? `stage ${buildFocus.stage}` : null}
+              {buildFocus.stage && buildFocus.source ? ' · ' : null}
+              {buildFocus.source ? `source ${buildFocus.source}` : null}
+            </p>
+          ) : null}
           <h4>Stages</h4>
           <div className="drawer-list">
-            {selectedBuildDetail.stages.map((stage) => (
-              <div key={stage.name} className="drawer-row">
-                <strong>{stage.name}</strong>
-                <StatusPill status={stage.status} />
-                <span>{stage.duration}</span>
-              </div>
-            ))}
+            {selectedBuildDetail.stages.map((stage) => {
+              const focused = buildFocus?.stage
+                && String(stage.name).toLowerCase().includes(String(buildFocus.stage).toLowerCase());
+              return (
+                <div
+                  key={stage.name}
+                  className={classNames('drawer-row', focused && 'drawer-row-focused')}
+                >
+                  <strong>{stage.name}</strong>
+                  <StatusPill status={stage.status} />
+                  <span>{stage.duration}</span>
+                </div>
+              );
+            })}
             {!selectedBuildDetail.stages.length && <p className="muted">No stage rows for this build.</p>}
           </div>
           <h4>Findings ({selectedBuildDetail.findings.length})</h4>
           <div className="drawer-list">
-            {selectedBuildDetail.findings.slice(0, 20).map((finding) => (
-              <button
-                key={finding.id}
-                className="drawer-row drawer-row-btn"
-                onClick={() => setSelectedFinding(finding)}
-              >
-                <strong>{finding.findingKey}</strong>
-                <span className={classNames('severity-label', `severity-${finding.severity}`)}>{finding.severity}</span>
-                <span>{finding.source}</span>
-              </button>
-            ))}
+            {selectedBuildDetail.findings.slice(0, 20).map((finding) => {
+              const focused = buildFocus?.source
+                && String(finding.source || '').toLowerCase().includes(String(buildFocus.source).toLowerCase());
+              return (
+                <button
+                  key={finding.id}
+                  className={classNames('drawer-row drawer-row-btn', focused && 'drawer-row-focused')}
+                  onClick={() => setSelectedFinding(finding)}
+                >
+                  <strong>{finding.findingKey}</strong>
+                  <span className={classNames('severity-label', `severity-${finding.severity}`)}>{finding.severity}</span>
+                  <span>{finding.source}</span>
+                </button>
+              );
+            })}
           </div>
           {selectedBuildDetail.aiAnalysis && (
             <>

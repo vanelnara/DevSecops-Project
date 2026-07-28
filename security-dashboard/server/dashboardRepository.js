@@ -99,6 +99,7 @@ export function emptyDashboardPayload(reason = '') {
       medium: 0,
       low: 0,
       blockedBuilds: 0,
+      successfulBuilds: 0,
       meanTimeToResolve: '—',
       coverage: 0,
       totalBuilds: 0,
@@ -110,13 +111,13 @@ export function emptyDashboardPayload(reason = '') {
       { name: 'Low', value: 0, color: severityColors.Low },
     ],
     trend: [
-      { day: 'Mon', critical: 0, high: 0, medium: 0 },
-      { day: 'Tue', critical: 0, high: 0, medium: 0 },
-      { day: 'Wed', critical: 0, high: 0, medium: 0 },
-      { day: 'Thu', critical: 0, high: 0, medium: 0 },
-      { day: 'Fri', critical: 0, high: 0, medium: 0 },
-      { day: 'Sat', critical: 0, high: 0, medium: 0 },
-      { day: 'Sun', critical: 0, high: 0, medium: 0 },
+      { day: 'Mon', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Tue', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Wed', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Thu', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Fri', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Sat', critical: 0, high: 0, medium: 0, total: 0 },
+      { day: 'Sun', critical: 0, high: 0, medium: 0, total: 0 },
     ],
     pipelinePerformance: [
       { stage: 'Checkout', duration: 0, baseline: 1, status: 'WAITING' },
@@ -404,12 +405,12 @@ export async function listActivity(limit = 30) {
 
 function controlsFromFindings(findings) {
   const sources = {
-    SAST: { tool: 'SonarQube', names: ['SonarQube', 'SAST'] },
-    SCA: { tool: 'OWASP Dependency-Check', names: ['OWASP'] },
-    Secrets: { tool: 'Gitleaks', names: ['Gitleaks'] },
-    Container: { tool: 'Trivy', names: ['Trivy'] },
-    Signing: { tool: 'Cosign', names: ['Cosign'] },
-    Deployment: { tool: 'Argo CD', names: ['K8s Deploy', 'Argo'] },
+    SAST: { tool: 'SonarQube', names: ['SonarQube', 'SAST'], stage: 'SAST', sourceKey: 'SonarQube' },
+    SCA: { tool: 'OWASP Dependency-Check', names: ['OWASP'], stage: 'OWASP', sourceKey: 'OWASP' },
+    Secrets: { tool: 'Gitleaks', names: ['Gitleaks'], stage: 'Gitleaks', sourceKey: 'Gitleaks' },
+    Container: { tool: 'Trivy', names: ['Trivy'], stage: 'Trivy', sourceKey: 'Trivy' },
+    Signing: { tool: 'Cosign', names: ['Cosign'], stage: 'Cosign', sourceKey: 'Cosign' },
+    Deployment: { tool: 'Argo CD', names: ['K8s Deploy', 'Argo'], stage: 'Deploy', sourceKey: 'Argo' },
   };
 
   return Object.entries(sources).map(([name, meta]) => {
@@ -417,8 +418,48 @@ function controlsFromFindings(findings) {
     const criticalOrHigh = related.some((f) => f.severity === 'critical' || f.severity === 'high');
     const status = related.length === 0 ? 'passing' : criticalOrHigh ? 'failing' : 'warning';
     const coverage = related.length === 0 ? 100 : Math.max(40, 100 - related.length * 4);
-    return { name, tool: meta.tool, status, coverage, findings: related.length };
+    return {
+      name,
+      tool: meta.tool,
+      status,
+      coverage,
+      findings: related.length,
+      stage: meta.stage,
+      sourceKey: meta.sourceKey,
+    };
   });
+}
+
+function padFindingTrend(rows) {
+  const byDay = new Map();
+  for (const row of rows) {
+    const key = row.day_date
+      ? new Date(row.day_date).toISOString().slice(0, 10)
+      : null;
+    if (!key) continue;
+    byDay.set(key, {
+      critical: Number(row.critical || 0),
+      high: Number(row.high || 0),
+      medium: Number(row.medium || 0),
+    });
+  }
+
+  const trend = [];
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const day = new Date();
+    day.setHours(0, 0, 0, 0);
+    day.setDate(day.getDate() - offset);
+    const key = day.toISOString().slice(0, 10);
+    const counts = byDay.get(key) || { critical: 0, high: 0, medium: 0 };
+    trend.push({
+      day: day.toLocaleDateString('en-US', { weekday: 'short' }),
+      critical: counts.critical,
+      high: counts.high,
+      medium: counts.medium,
+      total: counts.critical + counts.high + counts.medium,
+    });
+  }
+  return trend;
 }
 
 export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
@@ -458,18 +499,52 @@ export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
 
   const trendResult = await query(
     `SELECT
-       to_char(date_trunc('day', b.finished_at), 'Dy') AS day,
-       date_trunc('day', b.finished_at) AS day_date,
-       COUNT(*) FILTER (WHERE f.severity = 'critical')::int AS critical,
-       COUNT(*) FILTER (WHERE f.severity = 'high')::int AS high,
-       COUNT(*) FILTER (WHERE f.severity = 'medium')::int AS medium
+       to_char(date_trunc('day', COALESCE(b.finished_at, b.created_at)), 'Dy') AS day,
+       date_trunc('day', COALESCE(b.finished_at, b.created_at)) AS day_date,
+       COUNT(*) FILTER (WHERE lower(f.severity) = 'critical')::int AS critical,
+       COUNT(*) FILTER (WHERE lower(f.severity) = 'high')::int AS high,
+       COUNT(*) FILTER (WHERE lower(f.severity) = 'medium')::int AS medium
      FROM security_builds b
      LEFT JOIN findings f
        ON f.job_name = b.job_name AND f.build_number = b.build_number
-     WHERE b.finished_at >= NOW() - INTERVAL '7 days'
+     WHERE COALESCE(b.finished_at, b.created_at) >= NOW() - INTERVAL '7 days'
      GROUP BY day_date
      ORDER BY day_date`,
   );
+
+  let trend = padFindingTrend(trendResult.rows);
+  const trendTotal = trend.reduce((sum, row) => sum + row.total, 0);
+
+  // Fallback: show per-build finding lines when calendar days are empty/flat.
+  if (trendTotal === 0) {
+    const buildTrend = await query(
+      `SELECT
+         b.build_number,
+         COUNT(*) FILTER (WHERE lower(f.severity) = 'critical')::int AS critical,
+         COUNT(*) FILTER (WHERE lower(f.severity) = 'high')::int AS high,
+         COUNT(*) FILTER (WHERE lower(f.severity) = 'medium')::int AS medium
+       FROM security_builds b
+       LEFT JOIN findings f
+         ON f.job_name = b.job_name AND f.build_number = b.build_number
+       GROUP BY b.build_number, b.finished_at, b.created_at
+       ORDER BY COALESCE(b.finished_at, b.created_at) ASC NULLS LAST, b.build_number ASC
+       LIMIT 8`,
+    );
+    if (buildTrend.rows.length) {
+      trend = buildTrend.rows.map((row) => ({
+        day: `#${row.build_number}`,
+        critical: Number(row.critical || 0),
+        high: Number(row.high || 0),
+        medium: Number(row.medium || 0),
+        total: Number(row.critical || 0) + Number(row.high || 0) + Number(row.medium || 0),
+      }));
+    }
+  }
+
+  const successfulBuilds = builds.filter((b) => {
+    const status = String(b.status || '').toLowerCase();
+    return status === 'success' || status === 'successful' || status === 'passed';
+  }).length;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -484,6 +559,7 @@ export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
       medium: counts.medium,
       low: counts.low,
       blockedBuilds: builds.filter((b) => ['failed', 'unstable'].includes(String(b.status).toLowerCase())).length,
+      successfulBuilds,
       meanTimeToResolve: formatDuration(
         Math.round(
           builds.reduce((sum, b) => sum + Number(b.durationSeconds || 0), 0) / Math.max(builds.length, 1),
@@ -498,12 +574,7 @@ export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
       { name: 'Medium', value: counts.medium, color: severityColors.Medium },
       { name: 'Low', value: counts.low, color: severityColors.Low },
     ],
-    trend: trendResult.rows.map((row) => ({
-      day: row.day?.trim() || '—',
-      critical: row.critical,
-      high: row.high,
-      medium: row.medium,
-    })),
+    trend,
     pipelinePerformance: detail.stages.map((stage) => ({
       stage: stage.name,
       duration: stage.durationSeconds,

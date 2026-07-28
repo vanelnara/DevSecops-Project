@@ -1,3 +1,4 @@
+/** Lion AI mark + optional SentinelOps wordmark */
 export default function SentinelOpsLogo({ size = 64, className = '', showWordmark = false }) {
   const mark = (
     <svg
@@ -10,32 +11,41 @@ export default function SentinelOpsLogo({ size = 64, className = '', showWordmar
       aria-hidden="true"
     >
       <defs>
-        <linearGradient id="soShield" x1="12" y1="6" x2="52" y2="58" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#38BDF8" />
-          <stop offset="0.55" stopColor="#0EA5E9" />
-          <stop offset="1" stopColor="#0369A1" />
+        <linearGradient id="lionMane" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#FBBF24" />
+          <stop offset="0.45" stopColor="#F59E0B" />
+          <stop offset="1" stopColor="#B45309" />
         </linearGradient>
-        <linearGradient id="soGlow" x1="32" y1="10" x2="32" y2="54" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#E0F2FE" stopOpacity="0.95" />
-          <stop offset="1" stopColor="#7DD3FC" stopOpacity="0.35" />
+        <linearGradient id="lionFace" x1="22" y1="20" x2="42" y2="48" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#FEF3C7" />
+          <stop offset="1" stopColor="#FDE68A" />
         </linearGradient>
       </defs>
-      <rect x="2" y="2" width="60" height="60" rx="16" fill="#07131F" stroke="rgba(56,189,248,0.35)" />
-      <path
-        d="M32 10.5C26.2 14.2 19.8 16 13.5 16.2V31.4C13.5 42.2 21.1 51.4 32 54.5C42.9 51.4 50.5 42.2 50.5 31.4V16.2C44.2 16 37.8 14.2 32 10.5Z"
-        fill="url(#soShield)"
-      />
-      <path
-        d="M32 15.2C27.4 18.1 22.2 19.5 17 19.7V31.1C17 39.4 22.9 46.8 32 49.5C41.1 46.8 47 39.4 47 31.1V19.7C41.8 19.5 36.6 18.1 32 15.2Z"
-        fill="url(#soGlow)"
-        fillOpacity="0.22"
-      />
-      <circle cx="32" cy="30" r="5.2" fill="#F0F9FF" />
-      <circle cx="22.5" cy="36.5" r="2.4" fill="#BAE6FD" />
-      <circle cx="41.5" cy="36.5" r="2.4" fill="#BAE6FD" />
-      <circle cx="32" cy="41.8" r="2.2" fill="#7DD3FC" />
-      <path d="M32 35.2V39.4M27.2 33.4L24.2 35.4M36.8 33.4L39.8 35.4" stroke="#E0F2FE" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M24.8 24.2L29.2 27.4M39.2 24.2L34.8 27.4" stroke="#F0F9FF" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="2" y="2" width="60" height="60" rx="16" fill="#0B1220" stroke="rgba(251,191,36,0.4)" />
+      {/* mane */}
+      <circle cx="32" cy="33" r="22" fill="url(#lionMane)" />
+      <circle cx="14" cy="24" r="7" fill="#D97706" opacity="0.85" />
+      <circle cx="50" cy="24" r="7" fill="#D97706" opacity="0.85" />
+      <circle cx="18" cy="44" r="6.5" fill="#B45309" opacity="0.9" />
+      <circle cx="46" cy="44" r="6.5" fill="#B45309" opacity="0.9" />
+      <circle cx="32" cy="14" r="7" fill="#F59E0B" />
+      {/* face */}
+      <ellipse cx="32" cy="34" rx="14" ry="15" fill="url(#lionFace)" />
+      {/* eyes */}
+      <ellipse cx="26.5" cy="31" rx="2.2" ry="2.6" fill="#0F172A" />
+      <ellipse cx="37.5" cy="31" rx="2.2" ry="2.6" fill="#0F172A" />
+      <circle cx="27.2" cy="30.2" r="0.7" fill="#FFF7ED" />
+      <circle cx="38.2" cy="30.2" r="0.7" fill="#FFF7ED" />
+      {/* nose / muzzle */}
+      <ellipse cx="32" cy="38.5" rx="4.2" ry="3.2" fill="#F59E0B" />
+      <path d="M30.2 37.6c.5-.7 1.3-1.1 1.8-1.1s1.3.4 1.8 1.1" stroke="#92400E" strokeWidth="1.1" strokeLinecap="round" />
+      <path d="M32 39.2v3.2M32 42.4c-1.6 1.4-3.4 1.6-4.6 1.2M32 42.4c1.6 1.4 3.4 1.6 4.6 1.2" stroke="#92400E" strokeWidth="1.15" strokeLinecap="round" />
+      {/* ears */}
+      <path d="M21 22.5l-3.2-5.5 6.2 2.2z" fill="#FBBF24" stroke="#B45309" strokeWidth="0.8" />
+      <path d="M43 22.5l3.2-5.5-6.2 2.2z" fill="#FBBF24" stroke="#B45309" strokeWidth="0.8" />
+      {/* AI spark */}
+      <circle cx="48" cy="14" r="5.2" fill="#0EA5E9" stroke="#E0F2FE" strokeWidth="1.2" />
+      <path d="M48 11.4v5.2M45.4 14h5.2" stroke="#F0F9FF" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 
