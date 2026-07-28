@@ -44,7 +44,7 @@ This guide is written so another engineer can **follow the screens**, adapt IPs/
 10. [Open Grafana (monitoring)](#open-grafana-monitoring)
 11. [Fast path (already have Jenkins + K8s)](#fast-path-already-have-jenkins--k8s)
 12. [Where to go next](#where-to-go-next)
-13. [Screenshot inventory](#screenshot-inventory)
+13. [Closing notes](#closing-notes)
 
 ---
 
@@ -487,33 +487,10 @@ Questions about dashboard data → [docs/SECURITY_DASHBOARD_BACKEND.md](docs/SEC
 
 ---
 
-## Screenshot inventory
+## Closing notes
 
-Images live under [`docs/images/guide/`](docs/images/guide/). Architecture diagram: [`docs/images/devsecops-architecture.png`](docs/images/devsecops-architecture.png).
+SentinelOps is more than a collection of tools wired together — it is a full story of how modern software can move from a developer’s commit to a running service on Kubernetes while staying under continuous security scrutiny. Along the way you practice the same habits teams use in industry: automate the boring parts with Ansible and Jenkins, shift security left with scanners and signing, deploy through GitOps, explain findings with AI, and watch the whole system with Grafana and Prometheus.
 
-| File | Included |
-|------|----------|
-| `01-github-repo-home.png` | Yes |
-| `02-ansible-ping-success.png` | Yes |
-| `03-ansible-playbook-success.png` | Yes |
-| `04-jenkins-home.png` | Yes |
-| `05-jenkins-credentials.png` | Yes |
-| `06-jenkins-pipeline-job.png` | Yes |
-| `07-sonarqube-home.png` | Yes |
-| `08-jenkins-pipeline-running.png` | Yes |
-| `09-jenkins-pipeline-success.png` | Yes |
-| `10-jenkins-console-grafana-metrics.png` | Yes |
-| `11-sonarqube-analysis-results.png` | Yes |
-| `12-jenkins-artifacts-reports.png` | Yes |
-| `13-argocd-apps-overview.png` | Yes |
-| `14-kubernetes-pods.png` | Yes |
-| `15-simple-shop-home.png` | Yes |
-| `16-sentinelops-login.png` | Yes |
-| `17-sentinelops-overview.png` | Yes |
-| `18-sentinelops-findings.png` | Yes |
-| `19-sentinelops-ai-copilot.png` | Yes |
-| `20-grafana-login.png` | Yes |
-| `21-grafana-devsecops-overview.png` | Yes |
-| `22-prometheus-targets-core-up.png` | Yes |
+If you are exploring this repository to learn, to hire, or to rebuild the lab for yourself: clone it, adapt the IPs and secrets, run the pipeline, and walk the screens in order. The goal is a platform you can explain end to end — and improve with confidence.
 
-Optional (skipped on purpose): `00-prerequisites-lab-overview.png`.
+Built with care by **vanelnara** 🙂
