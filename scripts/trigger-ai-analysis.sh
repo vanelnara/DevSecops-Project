@@ -8,6 +8,7 @@ cd "${ROOT}"
 export AI_PORT="${AI_PORT:-4300}"
 export AI_ANALYZER_URL="http://127.0.0.1:${AI_PORT}"
 export AI_TIMEOUT_MS="${AI_TIMEOUT_MS:-60000}"
+export INGEST_PORT="${INGEST_PORT:-4200}"
 export JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
 export JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
 export JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
@@ -23,15 +24,33 @@ fi
 
 : "${JENKINS_DB_PASSWORD:?JENKINS_DB_PASSWORD is required}"
 
-chmod +x scripts/ensure-ai.sh
+chmod +x scripts/ensure-ai.sh scripts/ensure-ingest.sh scripts/publish-to-dashboard.sh
 scripts/ensure-ai.sh
 
 HEALTH="$(curl -sS --max-time 5 "${AI_ANALYZER_URL}/health" || true)"
 echo "AI health => ${HEALTH}"
 if ! echo "${HEALTH}" | grep -q '"database"[[:space:]]*:[[:space:]]*true'; then
   echo "ERROR: AI analyzer is up but PostgreSQL is not reachable (database:false)."
-  echo "Check JENKINS_DB_PASSWORD / Postgres on ${JENKINS_DB_HOST}:${JENKINS_DB_PORT}"
   exit 1
+fi
+
+ensure_build_ingested() {
+  local encoded
+  encoded="$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ.get('JOB_NAME','Devops-project')))")"
+  local verify
+  verify="$(curl -sS --max-time 5 "http://127.0.0.1:${INGEST_PORT}/builds/${encoded}/${BUILD_NUMBER}" || true)"
+  echo "Ingest lookup => ${verify}"
+  echo "${verify}" | grep -Eq '"found"[[:space:]]*:[[:space:]]*true'
+}
+
+if ! ensure_build_ingested; then
+  echo "WARN: build ${JOB_NAME} #${BUILD_NUMBER} missing in security_builds — re-running Store Findings publish..."
+  export FORCE_INGEST_RESTART=1
+  scripts/publish-to-dashboard.sh
+  if ! ensure_build_ingested; then
+    echo "ERROR: build still missing after re-publish. AI Analysis cannot run."
+    exit 1
+  fi
 fi
 
 echo "Requesting AI analysis for ${JOB_NAME} #${BUILD_NUMBER} at ${AI_ANALYZER_URL}/analyze"
@@ -59,14 +78,15 @@ for attempt in 1 2 3; do
     echo "AI analysis OK"
     exit 0
   fi
-  echo "WARN: analyze did not return ok:true (attempt ${attempt}/3)"
+  if echo "${RESPONSE}" | grep -q 'No ingested build'; then
+    echo "WARN: analyze 404 — forcing re-publish then retry"
+    export FORCE_INGEST_RESTART=1
+    scripts/publish-to-dashboard.sh || true
+  fi
   sleep 2
 done
 
 echo "ERROR: AI analysis failed after retries"
 echo "Last HTTP status: ${HTTP_CODE}"
 echo "Last body: ${RESPONSE}"
-if echo "${RESPONSE}" | grep -q 'No ingested build'; then
-  echo "Hint: Store Findings did not ingest this build into PostgreSQL before AI Analysis."
-fi
 exit 1

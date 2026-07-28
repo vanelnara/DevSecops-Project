@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ensure the ingest bridge is running on the Jenkins agent and can reach Postgres.
-# Prefers a host Node process on 127.0.0.1 (avoids Docker bridge 172.17.0.1 issues).
+# Always prefers a tracked host Node process (never a leftover Docker ingest on :4200).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -12,6 +12,7 @@ PID_DIR="${RUNTIME_DIR}/pids"
 PID_FILE="${PID_DIR}/ingest-bridge.pid"
 LOG_FILE="${LOG_DIR}/ingest-bridge.log"
 DIR="${ROOT}/services/ingest-bridge"
+FORCE_RESTART="${FORCE_INGEST_RESTART:-0}"
 
 JENKINS_DB_HOST="${JENKINS_DB_HOST:-127.0.0.1}"
 JENKINS_DB_PORT="${JENKINS_DB_PORT:-5432}"
@@ -19,21 +20,34 @@ JENKINS_DB_NAME="${JENKINS_DB_NAME:-jenkins}"
 JENKINS_DB_USER="${JENKINS_DB_USER:-jenkins}"
 : "${JENKINS_DB_PASSWORD:?JENKINS_DB_PASSWORD is required}"
 
-# Never use Docker bridge gateway for host Postgres.
 if [ "${JENKINS_DB_HOST}" = "host.docker.internal" ] || [ "${JENKINS_DB_HOST}" = "172.17.0.1" ]; then
   JENKINS_DB_HOST="127.0.0.1"
 fi
 
 mkdir -p "${LOG_DIR}" "${PID_DIR}"
 
+# Docker ingest often looks "healthy" while writing to a different Postgres than AI uses.
+if command -v docker >/dev/null 2>&1; then
+  docker rm -f devsecops-ingest >/dev/null 2>&1 || true
+fi
+
 healthy_db() {
   local body
   body="$(curl --silent --show-error --max-time 3 "${HEALTH_URL}" 2>/dev/null || true)"
-  echo "${body}" | grep -q '"database":true'
+  echo "${body}" | grep -q '"database":true' || return 1
+  # Prefer host process we manage; reject anonymous listeners (e.g. foreign containers).
+  if [ -f "${PID_FILE}" ]; then
+    local pid
+    pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  return 1
 }
 
-if healthy_db; then
-  echo "ingest already healthy at ${HEALTH_URL}"
+if [ "${FORCE_RESTART}" != "1" ] && healthy_db; then
+  echo "ingest already healthy at ${HEALTH_URL} (host pid $(cat "${PID_FILE}"))"
   curl --silent --show-error --max-time 3 "${HEALTH_URL}" || true
   echo
   exit 0
@@ -41,10 +55,6 @@ fi
 
 echo "Starting host ingest-bridge on :${INGEST_PORT} (DB ${JENKINS_DB_HOST}:${JENKINS_DB_PORT})"
 
-# Stop stale docker ingest that may own the port without working DB access.
-if command -v docker >/dev/null 2>&1; then
-  docker rm -f devsecops-ingest >/dev/null 2>&1 || true
-fi
 if [ -f "${PID_FILE}" ]; then
   old_pid="$(cat "${PID_FILE}" 2>/dev/null || true)"
   if [ -n "${old_pid}" ]; then
@@ -63,6 +73,7 @@ elif command -v lsof >/dev/null 2>&1; then
     kill ${pids} 2>/dev/null || true
   fi
 fi
+sleep 1
 
 cd "${DIR}"
 if [ -f package-lock.json ]; then
@@ -80,7 +91,7 @@ nohup node src/index.js >>"${LOG_FILE}" 2>&1 &
 echo $! >"${PID_FILE}"
 echo "ingest pid $(cat "${PID_FILE}") — logs: ${LOG_FILE}"
 
-for i in $(seq 1 30); do
+for i in $(seq 1 45); do
   if healthy_db; then
     echo "ingest is healthy:"
     curl --silent --show-error --max-time 3 "${HEALTH_URL}"

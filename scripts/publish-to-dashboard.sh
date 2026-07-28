@@ -32,6 +32,8 @@ fi
 : "${JENKINS_DB_PASSWORD:?JENKINS_DB_PASSWORD is required}"
 
 chmod +x scripts/ensure-ingest.sh
+# Always refresh host ingest so we never publish into a leftover Docker/wrong-DB process.
+export FORCE_INGEST_RESTART=1
 scripts/ensure-ingest.sh
 
 META_FILE="$(mktemp)"
@@ -83,3 +85,9 @@ echo "Publishing build ${JOB_NAME} #${BUILD_NUMBER} to ${INGEST_URL}"
 RESPONSE="$(curl "${CURL_ARGS[@]}")"
 echo "${RESPONSE}"
 echo "${RESPONSE}" | grep -Eq '"ok"[[:space:]]*:[[:space:]]*true'
+
+VERIFY_URL="http://127.0.0.1:${INGEST_PORT:-4200}/builds/$(python3 -c "import urllib.parse,os; print(urllib.parse.quote(os.environ['JOB_NAME']))")/${BUILD_NUMBER}"
+VERIFY="$(curl -sS --max-time 5 "${VERIFY_URL}" || true)"
+echo "Verify ingest row => ${VERIFY}"
+echo "${VERIFY}" | grep -Eq '"found"[[:space:]]*:[[:space:]]*true'
+echo "Store Findings verified in PostgreSQL for ${JOB_NAME} #${BUILD_NUMBER}"

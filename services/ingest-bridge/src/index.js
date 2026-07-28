@@ -170,6 +170,25 @@ app.get('/health', async (_req, res) => {
   });
 });
 
+app.get('/builds/:jobName/:buildNumber', async (req, res) => {
+  try {
+    const jobName = decodeURIComponent(req.params.jobName);
+    const buildNumber = Number(req.params.buildNumber);
+    const result = await query(
+      `SELECT job_name, build_number, status, risk_score, finished_at
+       FROM security_builds
+       WHERE job_name = $1 AND build_number = $2`,
+      [jobName, buildNumber],
+    );
+    if (!result.rows[0]) {
+      return res.status(404).json({ ok: false, found: false, jobName, buildNumber });
+    }
+    return res.json({ ok: true, found: true, build: result.rows[0] });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
+});
+
 app.post(
   '/ingest/build',
   auth,
