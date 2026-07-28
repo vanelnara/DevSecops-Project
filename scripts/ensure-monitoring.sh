@@ -5,10 +5,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
+# Windows checkouts can leave CRLF and break #!/usr/bin/env bash on Linux agents.
+sed -i 's/\r$//' "${ROOT}/scripts/"*.sh 2>/dev/null || true
+chmod +x "${ROOT}/scripts/"*.sh 2>/dev/null || true
+
 COMPOSE_FILE="${ROOT}/monitoring/docker-compose.yml"
 ENV_FILE="${ROOT}/monitoring/.env"
 GRAFANA_URL="${GRAFANA_URL:-http://127.0.0.1:3030}"
 PUSHGATEWAY_URL="${PUSHGATEWAY_URL:-http://127.0.0.1:9091}"
+
+# Pipeline metrics only need Pushgateway (+ Grafana). Core prometheus.yml scrapes
+# pushgateway/cadvisor/prometheus — optional Jenkins/K8s jobs stay in scrape-optional.yml.example.
 
 if [ ! -f "${ENV_FILE}" ]; then
   if [ -f "${ROOT}/monitoring/.env.example" ]; then

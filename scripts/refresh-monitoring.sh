@@ -5,6 +5,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
+sed -i 's/\r$//' "${ROOT}/scripts/"*.sh 2>/dev/null || true
+chmod +x "${ROOT}/scripts/"*.sh 2>/dev/null || true
+
 ENV_FILE="${ROOT}/monitoring/.env"
 COMPOSE_FILE="${ROOT}/monitoring/docker-compose.yml"
 

@@ -70,12 +70,10 @@ export default function SettingsView({
   });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
-  const [activity, setActivity] = useState([]);
   const [openPanels, setOpenPanels] = useState({
     account: true,
     credentials: false,
     theme: false,
-    activity: false,
   });
 
   const options = [
@@ -90,23 +88,6 @@ export default function SettingsView({
       currentUsername: user?.username || '',
     }));
   }, [user?.username]);
-
-  useEffect(() => {
-    if (!user) {
-      setActivity([]);
-      return undefined;
-    }
-    let cancelled = false;
-    fetch('/api/auth/activity?limit=12', { credentials: 'include' })
-      .then((res) => res.json())
-      .then((payload) => {
-        if (!cancelled) setActivity(payload.activity || []);
-      })
-      .catch(() => {
-        if (!cancelled) setActivity([]);
-      });
-    return () => { cancelled = true; };
-  }, [user?.id]);
 
   function togglePanel(key) {
     setOpenPanels((current) => ({ ...current, [key]: !current[key] }));
@@ -190,7 +171,6 @@ export default function SettingsView({
       <div className="view-toolbar">
         <div>
           <h2>Settings</h2>
-          <p>Account profile, credential rotation, and appearance</p>
         </div>
       </div>
 
@@ -315,28 +295,6 @@ export default function SettingsView({
               ))}
             </div>
           </div>
-        </CollapseCard>
-
-        <CollapseCard
-          id="activity"
-          title="Recent activity"
-          summary={activity.length ? `${activity.length} recent actions` : 'No saved actions yet'}
-          icon={Users}
-          open={openPanels.activity}
-          onToggle={() => togglePanel('activity')}
-        >
-          {!activity.length ? (
-            <div className="panel-placeholder compact">Triage a finding or ask the copilot to populate this list.</div>
-          ) : (
-            <div className="user-activity-list">
-              {activity.map((item) => (
-                <article key={item.id}>
-                  <strong>{item.action}</strong>
-                  <span>{new Date(item.created_at).toLocaleString()}</span>
-                </article>
-              ))}
-            </div>
-          )}
         </CollapseCard>
       </div>
     </main>

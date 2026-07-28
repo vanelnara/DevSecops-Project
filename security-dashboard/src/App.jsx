@@ -160,9 +160,7 @@ function Sidebar({ open, onClose, view, onNavigate, counts, user }) {
           </div>
           <div>
             <strong>SentinelOps</strong>
-            <span>Security Intelligence</span>
           </div>
-          <button className="icon-button sidebar-close" onClick={onClose}><X size={18} /></button>
         </div>
 
         <div className="workspace-switcher">
@@ -197,14 +195,6 @@ function Sidebar({ open, onClose, view, onNavigate, counts, user }) {
             <Settings size={18} /><span>Settings</span>
           </button>
         </nav>
-
-        <div className="sidebar-status">
-          <div className="status-ring"><Activity size={17} /></div>
-          <div>
-            <strong>{counts.mode === 'postgres' ? 'Live PostgreSQL' : 'Awaiting pipeline data'}</strong>
-            <span>{counts.mode === 'postgres' ? `${counts.builds} builds ingested` : 'Run Jenkins publish stages'}</span>
-          </div>
-        </div>
       </aside>
     </>
   );
@@ -430,33 +420,20 @@ function OverviewView({
 
   return (
     <main className="dashboard">
-      {!hasLive && (
-        <div className="waiting-banner">
-          <Database size={16} />
-          <span>{data.waitingReason || 'Dashboard shell ready — metrics fill automatically when Jenkins publishes a build.'}</span>
-        </div>
-      )}
-
-      <section className="context-strip">
-        <div className="live-indicator"><i /> {hasLive ? 'LIVE FROM POSTGRES' : 'AWAITING PIPELINE DATA'}</div>
-        {hasLive ? (
+      {hasLive ? (
+        <section className="context-strip">
+          <div className="live-indicator"><i /> LIVE FROM POSTGRES</div>
           <button className="context-pipeline" onClick={() => onOpenBuild(data.selectedBuild.jobName, data.selectedBuild.buildNumber)}>
             <span>Selected build</span>
             <strong>{data.selectedBuild.jobName} <em>#{data.selectedBuild.buildNumber}</em></strong>
             <StatusPill status={data.selectedBuild.status} />
           </button>
-        ) : (
-          <div className="context-pipeline">
-            <span>Selected build</span>
-            <strong>No build ingested yet</strong>
-            <StatusPill status="waiting" />
+          <div className="context-meta">
+            <div><GitBranch size={14} /> {`${data.selectedBuild.branch} · ${data.selectedBuild.commit}`}</div>
+            <div><Clock3 size={14} /> {`${data.selectedBuild.duration} · ${data.selectedBuild.finishedAt}`}</div>
           </div>
-        )}
-        <div className="context-meta">
-          <div><GitBranch size={14} /> {hasLive ? `${data.selectedBuild.branch} · ${data.selectedBuild.commit}` : 'branch · commit'}</div>
-          <div><Clock3 size={14} /> {hasLive ? `${data.selectedBuild.duration} · ${data.selectedBuild.finishedAt}` : 'duration · waiting'}</div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="metrics-grid metrics-grid-live">
         <MetricCard
@@ -615,35 +592,53 @@ function OverviewView({
       </Panel>
 
       <section className="analysis-grid">
-        <Panel title="Priority alerts" subtitle="Open findings on selected build" action={<button className="text-button" onClick={onGoFindings}>All findings <ChevronRight size={15} /></button>}>
+        <Panel
+          className="priority-alerts-panel"
+          title="Priority alerts"
+          subtitle="Open findings on selected build"
+          action={<button className="text-button" onClick={onGoFindings}>All findings <ChevronRight size={15} /></button>}
+        >
           {!data.alerts.length ? (
             <div className="panel-placeholder">No open alerts yet. Scanner findings appear here after ingest.</div>
           ) : (
             <div className="alert-list">
-              {data.alerts.slice(0, 6).map((alert) => (
-                <button className="alert-item alert-item-btn" key={alert.id || alert.findingKey} onClick={() => onOpenFinding(alert)}>
-                  <div className={classNames('alert-severity', `severity-${alert.severity}`)}><AlertTriangle size={17} /></div>
-                  <div className="alert-main">
-                    <div className="alert-title">
-                      <strong>{alert.title}</strong>
-                      <span className={classNames('severity-label', `severity-${alert.severity}`)}>{alert.severity}</span>
-                    </div>
-                    <p>{alert.asset}</p>
-                    <div className="alert-meta">
-                      <span>{alert.findingKey || alert.id}</span><i /><span>{alert.source}</span><i /><span>{alert.pipeline}</span>
-                    </div>
-                  </div>
-                  <div className="alert-side">
-                    <span>{alert.age}</span>
+              {[...data.alerts]
+                .sort((a, b) => {
+                  const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+                  const sa = rank[String(a.severity || '').toLowerCase()] ?? 9;
+                  const sb = rank[String(b.severity || '').toLowerCase()] ?? 9;
+                  if (sa !== sb) return sa - sb;
+                  return String(a.title || '').localeCompare(String(b.title || ''));
+                })
+                .slice(0, 10)
+                .map((alert) => (
+                  <button
+                    className="alert-item alert-item-btn"
+                    key={alert.id || alert.findingKey}
+                    onClick={() => onOpenFinding(alert)}
+                    type="button"
+                  >
+                    <span className={classNames('severity-label', `severity-${alert.severity}`)}>
+                      {alert.severity}
+                    </span>
+                    <strong className="alert-title-text">{alert.title}</strong>
+                    <span className="alert-source">{alert.source}</span>
+                    <span className="alert-key">{alert.findingKey || alert.id}</span>
+                    <span className="alert-age">{alert.age}</span>
                     <StatusPill status={alert.status} />
-                  </div>
-                </button>
-              ))}
+                    <ChevronRight size={16} className="alert-chevron" />
+                  </button>
+                ))}
             </div>
           )}
         </Panel>
 
-        <Panel title="AI security analyst" subtitle={data.selectedBuild ? `Verdict for ${data.selectedBuild.jobName} #${data.selectedBuild.buildNumber}` : 'Verdict stored for this build'} action={<span className="ai-live"><Sparkles size={13} /> {data.aiAnalysis?.model || 'pending'}</span>}>
+        <Panel
+          className="ai-analyst-panel"
+          title="AI security analyst"
+          subtitle={data.selectedBuild ? `Verdict for ${data.selectedBuild.jobName} #${data.selectedBuild.buildNumber}` : 'Verdict stored for this build'}
+          action={<span className="ai-live"><Sparkles size={13} /> {data.aiAnalysis?.model || 'pending'}</span>}
+        >
           {!data.aiAnalysis ? (
             <div className="ai-verdict">
               <div className="ai-orb"><Bot size={24} /></div>
@@ -653,7 +648,7 @@ function OverviewView({
               </div>
             </div>
           ) : (
-            <>
+            <div className="ai-analyst-body">
               <div className="ai-verdict">
                 <div className="ai-orb"><Bot size={24} /></div>
                 <div>
@@ -663,8 +658,24 @@ function OverviewView({
                   <strong>{data.aiAnalysis.verdict}</strong>
                 </div>
               </div>
-              <p className="ai-narrative">{data.aiAnalysis.narrative}</p>
-            </>
+              {data.aiAnalysis.narrative ? (
+                <p className="ai-narrative">{data.aiAnalysis.narrative}</p>
+              ) : null}
+              {Array.isArray(data.aiAnalysis.priorities) && data.aiAnalysis.priorities.length ? (
+                <div className="ai-overview-priorities">
+                  {data.aiAnalysis.priorities.map((item, index) => (
+                    <article key={`${item.priority || index}-${item.title}`}>
+                      <header>
+                        <em>{item.priority || `P${index + 1}`}</em>
+                        <small>{item.effort || '—'}</small>
+                      </header>
+                      <strong>{item.title}</strong>
+                      {item.impact ? <p>{item.impact}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           )}
         </Panel>
       </section>
@@ -1285,14 +1296,6 @@ export default function App() {
           />
         )}
 
-        <footer className="dashboard-footer">
-          <span><Shield size={14} /> SentinelOps Security Intelligence</span>
-          <span>
-            {data.dataMode === 'postgres'
-              ? `Live PostgreSQL · build #${selectedBuild?.buildNumber || '—'}`
-              : 'Waiting for real pipeline ingest — no mock data'}
-          </span>
-        </footer>
       </div>
 
       {selectedBuildDetail && (

@@ -321,16 +321,6 @@ export default function AIView({
 
   return (
     <main className="dashboard ai-lab">
-      {!hasLive && (
-        <div className="waiting-banner">
-          <Database size={16} />
-          <span>
-            {data?.waitingReason
-              || 'No pipeline ingested yet — chat still works for DevOps / DevSecOps / networking / cloud. Push Jenkins to unlock build analysis.'}
-          </span>
-        </div>
-      )}
-
       <section className="context-strip">
         <div className={classNames('live-indicator', agentStatus.online ? 'agent-online' : 'agent-offline')}>
           <i />
@@ -348,13 +338,7 @@ export default function AIView({
             </strong>
             <StatusPill status={selectedBuild.status} />
           </div>
-        ) : (
-          <div className="context-pipeline">
-            <span>Investigating build</span>
-            <strong>No build ingested yet</strong>
-            <StatusPill status="waiting" />
-          </div>
-        )}
+        ) : null}
         <div className="context-meta">
           <div>
             <GitBranch size={14} />

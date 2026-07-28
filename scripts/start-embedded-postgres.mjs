@@ -22,7 +22,7 @@ async function run(cmd, args, cwd) {
     const child = spawn(cmd, args, {
       cwd,
       stdio: 'inherit',
-      shell: false,
+      shell: true,
       windowsHide: true,
     });
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} failed: ${code}`))));
@@ -64,7 +64,10 @@ async function applySql(client, filePath) {
 async function main() {
   await ensurePackage();
 
-  const EmbeddedPostgres = require('embedded-postgres');
+  const EmbeddedPostgresMod = await import(
+    pathToFileURL(path.join(dashDir, 'node_modules', 'embedded-postgres', 'dist', 'index.js')).href
+  );
+  const EmbeddedPostgres = EmbeddedPostgresMod.default || EmbeddedPostgresMod;
   const { Client } = require('pg');
 
   fs.mkdirSync(dataDir, { recursive: true });

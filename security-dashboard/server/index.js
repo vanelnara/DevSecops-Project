@@ -150,7 +150,8 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     await bootstrapUserSchema();
     const user = await authenticateUser(req.body?.login || req.body?.username || req.body?.email, req.body?.password);
-    const session = await createSession(user.id);
+    const rememberMe = req.body?.rememberMe !== false && req.body?.keepSignedIn !== false;
+    const session = await createSession(user.id, { rememberMe });
     res.setHeader('Set-Cookie', sessionCookie(session.token, session.expiresAt));
     return res.json({ authenticated: true, user, expiresAt: session.expiresAt });
   } catch (error) {

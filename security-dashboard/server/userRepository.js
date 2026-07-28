@@ -2,6 +2,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import { query } from './db.js';
 
 const SESSION_DAYS = 14;
+const SESSION_DAYS_SHORT = 1;
 const SCRYPT_KEYLEN = 64;
 
 function hashPassword(password, salt = randomBytes(16).toString('hex')) {
@@ -170,14 +171,15 @@ export async function authenticateUser(login, password) {
   return publicUser(row);
 }
 
-export async function createSession(userId) {
+export async function createSession(userId, { rememberMe = true } = {}) {
   const token = randomBytes(32).toString('hex');
-  const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  const days = rememberMe ? SESSION_DAYS : SESSION_DAYS_SHORT;
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
   await query(
     `INSERT INTO dashboard_sessions (token, user_id, expires_at) VALUES ($1, $2, $3)`,
     [token, userId, expires.toISOString()],
   );
-  await recordActivity(userId, 'user.login', {});
+  await recordActivity(userId, 'user.login', { rememberMe: Boolean(rememberMe) });
   return { token, expiresAt: expires.toISOString() };
 }
 

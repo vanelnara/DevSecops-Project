@@ -582,7 +582,16 @@ export async function buildDashboardPayload({ jobName, buildNumber } = {}) {
       status: stage.status,
     })),
     pipelines: builds,
-    alerts: detail.findings.filter((f) => f.status !== 'resolved' && f.status !== 'false-positive').slice(0, 12),
+    alerts: detail.findings
+      .filter((f) => f.status !== 'resolved' && f.status !== 'false-positive')
+      .sort((a, b) => {
+        const rank = { critical: 0, high: 1, medium: 2, low: 3 };
+        const sa = rank[String(a.severity || '').toLowerCase()] ?? 9;
+        const sb = rank[String(b.severity || '').toLowerCase()] ?? 9;
+        if (sa !== sb) return sa - sb;
+        return String(a.title || '').localeCompare(String(b.title || ''));
+      })
+      .slice(0, 12),
     controls,
     aiAnalysis: detail.aiAnalysis,
     activity,

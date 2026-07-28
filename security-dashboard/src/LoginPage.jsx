@@ -3,8 +3,9 @@ import SentinelOpsLogo from './SentinelOpsLogo.jsx';
 
 export default function LoginPage({ onAuthenticated, resolvedTheme, forcePassword = false, user: lockedUser = null }) {
   const [step, setStep] = useState(forcePassword ? 'set-password' : 'login'); // login | set-password
-  const [username, setUsername] = useState(lockedUser?.username || 'admin');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState(lockedUser?.username || '');
+  const [password, setPassword] = useState('');
+  const [keepSignedIn, setKeepSignedIn] = useState(true);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -20,7 +21,11 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({
+          username,
+          password,
+          rememberMe: keepSignedIn,
+        }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || 'Login failed');
@@ -68,33 +73,26 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
       <section className="login-brand-pane" aria-label="SentinelOps branding">
         <div className="login-brand-glow" />
         <div className="login-brand-content">
-          <SentinelOpsLogo size={132} className="login-hero-logo-svg" showWordmark />
-          <p>Security command center for pipelines, findings, and AI-assisted investigations.</p>
-          <ul className="login-brand-points">
-            <li>Live PostgreSQL security intelligence</li>
-            <li>Per-user triage and chat history</li>
-            <li>DevSecOps-ready operator workspace</li>
-          </ul>
+          <SentinelOpsLogo size={148} className="login-hero-logo-svg" showWordmark />
+          <p className="login-brand-tagline">
+            Security command center for pipelines, findings, and AI-assisted investigations.
+          </p>
         </div>
-        <footer>DevSecOps Project · Local lab</footer>
       </section>
 
       <section className="login-form-pane login-form-pane-white">
-        <div className="login-card login-card-jenkins">
-          <div className="login-card-header">
-            <SentinelOpsLogo size={56} />
-            <div>
-              <strong>{step === 'login' ? 'Sign in' : 'Set a new password'}</strong>
-              <span>
-                {step === 'login'
-                  ? 'Enter your SentinelOps credentials'
-                  : 'Default password must be replaced before continuing'}
-              </span>
-            </div>
-          </div>
+        <div className="login-form-plain">
+          <header className="login-plain-header">
+            <h1>{step === 'login' ? 'Sign in' : 'Set a new password'}</h1>
+            <p>
+              {step === 'login'
+                ? 'Enter your SentinelOps credentials'
+                : 'Default password must be replaced before continuing'}
+            </p>
+          </header>
 
           {step === 'login' ? (
-            <form className="login-form" onSubmit={handleLogin}>
+            <form className="login-form login-form-jenkins" onSubmit={handleLogin}>
               <label>
                 <span>Username</span>
                 <input
@@ -102,7 +100,6 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
                   autoComplete="username"
                   value={username}
                   onChange={(event) => setUsername(event.target.value)}
-                  placeholder="admin"
                   required
                 />
               </label>
@@ -113,9 +110,17 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
                   autoComplete="current-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="••••••••"
                   required
                 />
+              </label>
+
+              <label className="login-keep-signed-in">
+                <input
+                  type="checkbox"
+                  checked={keepSignedIn}
+                  onChange={(event) => setKeepSignedIn(event.target.checked)}
+                />
+                <span>Keep me signed in</span>
               </label>
 
               {error ? <div className="login-error" role="alert">{error}</div> : null}
@@ -125,7 +130,7 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
               </button>
             </form>
           ) : (
-            <form className="login-form" onSubmit={handleSetPassword}>
+            <form className="login-form login-form-jenkins" onSubmit={handleSetPassword}>
               <p className="login-force-note">
                 Signed in as <strong>{pendingUser?.username || username}</strong>. Choose a new password to protect this lab account.
               </p>
@@ -137,7 +142,6 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(event) => setNewPassword(event.target.value)}
-                  placeholder="At least 5 characters"
                   required
                   minLength={5}
                 />
@@ -149,7 +153,6 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
                   autoComplete="new-password"
                   value={confirmPassword}
                   onChange={(event) => setConfirmPassword(event.target.value)}
-                  placeholder="Repeat new password"
                   required
                   minLength={5}
                 />
@@ -162,12 +165,6 @@ export default function LoginPage({ onAuthenticated, resolvedTheme, forcePasswor
               </button>
             </form>
           )}
-
-          {step === 'login' ? (
-            <p className="login-hint">
-              Default credentials: <code>admin</code> / <code>admin</code>
-            </p>
-          ) : null}
         </div>
       </section>
     </div>

@@ -587,6 +587,7 @@ pipeline {
                     runLoggedStage('Grafana Metrics', 'Pushing build/CPU/RAM monitoring metrics to Prometheus/Grafana') {
                         sh '''
                             set -eu
+                            sed -i 's/\r$//' scripts/*.sh 2>/dev/null || true
                             chmod +x scripts/ensure-monitoring.sh scripts/publish-metrics-to-grafana.sh
                             export PUSHGATEWAY_URL="${PUSHGATEWAY_URL:-http://127.0.0.1:9091}"
                             export GRAFANA_URL="${GRAFANA_URL:-http://127.0.0.1:3030}"
@@ -628,6 +629,7 @@ pipeline {
                     ]) {
                         sh '''
                             set +e
+                            sed -i 's/\r$//' scripts/*.sh 2>/dev/null || true
                             chmod +x scripts/ensure-monitoring.sh scripts/publish-metrics-to-grafana.sh
                             scripts/ensure-monitoring.sh || true
                             export JOB_NAME="${JOB_NAME}"
