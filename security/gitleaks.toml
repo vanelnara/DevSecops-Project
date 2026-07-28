@@ -1,9 +1,38 @@
 title = "DevSecOps Gitleaks config"
+
 [extend]
 useDefault = true
 
 [allowlist]
+description = "Lab false positives + fingerprints of revoked/rotated historical leaks"
+
 paths = [
   '''microservice/server/data/orders\.json''',
   '''\.git/''',
+  '''vars/github-token\.example''',
+  '''vars/credentials\.yml\.example''',
+  '''monitoring/\.env\.example''',
+  '''docs/.*''',
+]
+
+# Placeholder / variable references — not live secrets
+regexes = [
+  '''(?i)\$\{SONAR_TOKEN\}''',
+  '''(?i)\$\{NVD_API_KEY\}''',
+  '''(?i)\$\{HUGGINGFACE_API_KEY\}''',
+  '''(?i)\$\{JENKINS_DB_PASSWORD\}''',
+  '''(?i)\$\{GRAFANA_PASSWORD\}''',
+  '''(?i)\$\{GF_SMTP_PASSWORD\}''',
+  '''(?i)ghp_REPLACE_WITH_YOUR_TOKEN''',
+  '''(?i)YOUR_[A-Z0-9_]+''',
+  '''(?i)CHANGE_ME''',
+  '''(?i)sk-REPLACE''',
+]
+
+# Historical findings (already rotated / removed from HEAD). Kept so CI stays green
+# without rewriting published git history. Rotate these secrets in the provider UIs.
+fingerprints = [
+  '''4044ce402cbc0b30b84389e62547b0053f638e7d:.env.example:generic-api-key:16''',
+  '''396db8c0052a204dd0b1c194b4b44d6735e1f72f:Jenkinsfile:curl-auth-user:73''',
+  '''92e869b79bbd88becb4d2a3aa804cd965952ccd7:vars/github-token:github-pat:1''',
 ]

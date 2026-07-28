@@ -1,5 +1,8 @@
-# Paste your GitHub Personal Access Token on the line below (one line only)
+# Paste your GitHub Personal Access Token on the NEXT line only (no quotes).
 # Create at: https://github.com/settings/tokens  (enable "repo" scope)
-# Then: cp vars/github-token.example vars/github-token  and edit
+# Then: cp vars/github-token.example vars/github-token && edit vars/github-token
+#
+# Do NOT commit vars/github-token — it is gitignored.
+# Placeholder below is intentionally invalid so scanners stay quiet:
 
-ghp_REPLACE_WITH_YOUR_TOKEN
+REPLACE_WITH_YOUR_GITHUB_PAT

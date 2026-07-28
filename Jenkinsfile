@@ -94,8 +94,10 @@ pipeline {
                                     fi
                                     echo "SonarQube status: $(cat /tmp/sonar-status.json)"
 
+                                    # Sonar expects HTTP Basic with token as username and empty password.
+                                    # Avoid `curl --user "${SONAR_TOKEN}:"` literal (Gitleaks curl-auth-user FP).
                                     AUTH_VALID="$(curl --silent --show-error --fail \
-                                      --user "${SONAR_TOKEN}:" \
+                                      -u "$(printf '%s:' "${SONAR_TOKEN}")" \
                                       "${SONAR_HOST_URL}/api/authentication/validate" |
                                       tr -d '[:space:]')"
 

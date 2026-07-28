@@ -121,6 +121,7 @@ Agent-local services (always on the Jenkins node that runs the job):
 | **[docs/SECURITY_DASHBOARD_BACKEND.md](docs/SECURITY_DASHBOARD_BACKEND.md)** | Developers | Data plane (ingest → Postgres → AI → UI) |
 | **[docs/COSIGN.md](docs/COSIGN.md)** | Security | Cosign keypair and Jenkins secret IDs |
 | **[security-dashboard/README.md](security-dashboard/README.md)** | Frontend | Local dashboard API routes |
+| **[docs/GITLEAKS.md](docs/GITLEAKS.md)** | Security | Historical leak fingerprints + rotate checklist |
 | **[vars/credentials.yml.example](vars/credentials.yml.example)** | Checklist | Every secret you will paste into Jenkins (never commit real values) |
 
 ---
