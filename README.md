@@ -489,8 +489,8 @@ Questions about dashboard data → [docs/SECURITY_DASHBOARD_BACKEND.md](docs/SEC
 
 ## Closing notes
 
-SentinelOps is more than a collection of tools wired together — it is a full story of how modern software can move from a developer’s commit to a running service on Kubernetes while staying under continuous security scrutiny. Along the way you practice the same habits teams use in industry: automate the boring parts with Ansible and Jenkins, shift security left with scanners and signing, deploy through GitOps, explain findings with AI, and watch the whole system with Grafana and Prometheus.
+SentinelOps is more than a collection of tools wired together, it is a full story of how modern software can move from a developer’s commit to a running service on Kubernetes while staying under continuous security. Along the way you practice the same habits teams use in industry that is  automate the boring parts with Ansible and Jenkins, shift security left with scanners and signing, deploy through GitOps, explain findings with AI, and watch the whole system with Grafana and Prometheus.
 
-If you are exploring this repository to learn, to hire, or to rebuild the lab for yourself: clone it, adapt the IPs and secrets, run the pipeline, and walk the screens in order. The goal is a platform you can explain end to end — and improve with confidence.
+If you are exploring this repository to learn, to hire, or to rebuild the lab for yourself: clone it, adapt the IPs and secrets, run the pipeline, and walk the screens in order. The goal is a platform you can explain end to end and improve with confidence.
 
 Built with care by **vanelnara** 🙂
