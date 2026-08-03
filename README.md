@@ -1,4 +1,4 @@
-# SentinelOps — Cloud-Native DevSecOps Delivery Platform
+# SentinelOps: an AI-powered DevSecOps Delivery Platform
 
 > **Shift-left security · Jenkins CI/CD · GitOps on Kubernetes · AI-assisted triage · Observability**
 
